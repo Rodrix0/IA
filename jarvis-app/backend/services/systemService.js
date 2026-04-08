@@ -44,8 +44,22 @@ async function procesarMemoriaDinamica(busqueda) {
     } else {
         console.log(`[Búsqueda Dinámica]: Navegando en internet para aprender "${busqueda}"...`);
         
-        // Scraper actual enfocado en YouTube, en el futuro se pueden añadir otros
-        const nuevoLink = await buscarEnYoutube(busqueda);
+        let nuevoLink;
+        
+        // Enrutador inteligente: ¿Quiere información web o videos?
+        if (busqueda.includes('información') || busqueda.includes('informacion') || busqueda.includes('google')) {
+            // Limpia un poco la frase para no buscar literalmente 'informacion sobre X' en Google
+            let queryLimpio = busqueda
+                .replace('información sobre', '').replace('informacion sobre', '')
+                .replace('información de', '').replace('informacion de', '')
+                .replace('información', '').replace('informacion', '')
+                .replace('en google', '').trim();
+            
+            nuevoLink = `https://www.google.com/search?q=${encodeURIComponent(queryLimpio)}`;
+        } else {
+            // Scraper actual enfocado en YouTube para todo el resto
+            nuevoLink = await buscarEnYoutube(busqueda);
+        }
         
         // Lo guardamos en el JSON para no tener que buscarlo nunca más
         memoria[busqueda] = nuevoLink;
@@ -61,7 +75,16 @@ async function openApp(appName) {
     let command = '';
     const lowerApp = appName.toLowerCase();
 
-    // Mapeo básico estricto (solo palabras puras)
+    const websiteMap = {
+        'youtube': 'https://www.youtube.com',
+        'google': 'https://www.google.com',
+        'netflix': 'https://www.netflix.com',
+        'spotify': 'https://open.spotify.com',
+        'chat gpt': 'https://chat.openai.com',
+        'chatgpt': 'https://chat.openai.com',
+        'gemini': 'https://gemini.google.com'
+    };
+
     const pcGamesMap = {
         'steam': 'start steam://',
         'epic games': 'start com.epicgames.launcher://',
@@ -71,7 +94,7 @@ async function openApp(appName) {
 
     // A. ¿Es un juego/programa de la PC exacto?
     for (const [key, cmd] of Object.entries(pcGamesMap)) {
-        if (lowerApp === key || lowerApp === `el ${key}`) {
+        if (lowerApp.includes(key) || lowerApp === `el ${key}`) {
             command = platform === 'win32' ? cmd : `open "${key}"`;
             break;
         }
@@ -79,17 +102,18 @@ async function openApp(appName) {
 
     // B. ¿Es una aplicación nativa tradicional?
     if (!command) {
-        if (lowerApp === 'calculadora' || lowerApp === 'calc') {
+        if (lowerApp.includes('calculadora') || lowerApp.includes('calc')) {
             command = platform === 'win32' ? 'calc' : 'open -a Calculator';
-        } else if (lowerApp === 'chrome' || lowerApp === 'google chrome') {
+        } else if (lowerApp.includes('chrome') || lowerApp.includes('google chrome')) {
             command = platform === 'win32' ? 'start chrome' : 'open -a "Google Chrome"';
-        // Casos web crudos pero directos
-        } else if (lowerApp === 'youtube') {
-            command = platform === 'win32' ? `start https://youtube.com` : `open https://youtube.com`;
-        } else if (lowerApp === 'netflix') {
-            command = platform === 'win32' ? `start https://netflix.com` : `open https://netflix.com`;
-        } else if (lowerApp === 'spotify') {
-            command = platform === 'win32' ? `start https://open.spotify.com` : `open https://open.spotify.com`;
+        // Casos web exactos (si la frase contiene "chat gpt", etc.)
+        } else {
+            for (const [siteName, url] of Object.entries(websiteMap)) {
+                if (lowerApp.includes(siteName) && lowerApp.length < siteName.length + 5) {
+                    command = platform === 'win32' ? `start ${url}` : `open ${url}`;
+                    break;
+                }
+            }
         }
     }
 
@@ -97,7 +121,8 @@ async function openApp(appName) {
     // Lo enviamos al sistema dinámico de memoria
     if (!command) {
         const urlObtenida = await procesarMemoriaDinamica(lowerApp);
-        command = platform === 'win32' ? `start ${urlObtenida}` : platform === 'darwin' ? `open "${urlObtenida}"` : `xdg-open "${urlObtenida}"`;
+        // IMPORTANTE: En Windows, usamos start "" "URL" para que la consola no explote con caracteres especiales
+        command = platform === 'win32' ? `start "" "${urlObtenida}"` : platform === 'darwin' ? `open "${urlObtenida}"` : `xdg-open "${urlObtenida}"`;
     }
 
     // Ejecutar orden en el Sistema Operativo
@@ -116,8 +141,8 @@ async function openApp(appName) {
 function handleSystemCommand(text) {
     let lowerText = text.toLowerCase();
 
-    // Usar expresión regular para encontrar "abre [algo]" o "abrir [algo]"
-    const match = lowerText.match(/(?:abre|abrir) (.+)/i);
+    // Usar expresión regular para encontrar comandos de acción expansivos
+    const match = lowerText.match(/(?:abre|abrir|ir a|ve a|busca|buscar|búscame|búsqueda|preguntale a) (.+)/i);
 
     if (match) {
         let appToOpen = match[1].trim();
