@@ -45,22 +45,17 @@ if (SpeechRecognition) {
 
         console.log("Reconocido:", transcript);
 
-        // Si el sistema está activo, escuchar
-        if (isSystemActive) {
-            userBox.textContent = `"${transcript}"`;
-            jarvisBox.textContent = "Analizando directiva...";
-            setRingState('listening');
-            
-            // Envía al backend
-            socket.emit('process_speech', { text: transcript });
-        }
+        userBox.textContent = `"${transcript}"`;
+        jarvisBox.textContent = "Analizando memoria y directivas...";
+        setRingState('idle');
+        
+        // Envía al backend todo lo que escuchó
+        socket.emit('process_speech', { text: transcript });
     };
 
     recognition.onend = () => {
-        // Reiniciar automáticamente para escucha pasiva/activa continua si está encendido
-        if (isSystemActive) {
-            try { recognition.start(); } catch(e){}
-        }
+        // En modo Walkie-Talkie (PTT), el micrófono ya no se queda escuchando el vacío.
+        // Solo graba mientras tengas presionado el botón.
     };
 
     recognition.onerror = (event) => {
@@ -109,12 +104,10 @@ function speak(text, callback) {
         // Agregar un retraso para evitar que el micrófono capte el "eco" final de la sala
         setTimeout(() => {
             isJarvisSpeaking = false;
-            if(isSystemActive) {
-                setRingState('idle');
-                try { recognition.start(); } catch(e){}
-            }
+            setRingState('idle');
             if (callback) callback();
         }, 800); // 800 milisegundos de silencio
+
     };
 
     utterance.onerror = (e) => {
@@ -193,39 +186,48 @@ function setRingState(state) {
     ring.classList.add(state);
 }
 
-function startSystem() {
+function startSystem(e) {
+    if (e) e.preventDefault(); // Prevenir fallos en móviles
+    
+    // Forzamos a Jarvis a que se calle si estaba hablando de antes
+    window.speechSynthesis.cancel();
+    isJarvisSpeaking = false;
+
     if (!recognition) return;
-    isSystemActive = true;
-    btnToggleMic.innerHTML = '<i class="fa-solid fa-power-off"></i> APAGAR SISTEMA';
+    
+    btnToggleMic.innerHTML = '<i class="fa-solid fa-microphone"></i> ESCUCHANDO...';
     btnToggleMic.classList.add('active');
-    jarvisBox.textContent = "Sistema en línea. Puedes comenzar a hablar.";
-    setRingState('idle');
+    jarvisBox.textContent = "Te escucho, dime...";
+    setRingState('listening');
+    
     try {
         recognition.start();
     } catch(e) {}
-    
-    speak("Sistema Jarvis en línea a tu disposición.");
 }
 
-function stopSystem() {
-    isSystemActive = false;
-    btnToggleMic.innerHTML = '<i class="fa-solid fa-power-off"></i> INICIAR SISTEMA';
+function stopSystem(e) {
+    if (e) e.preventDefault();
+    if (!recognition) return;
+    
+    btnToggleMic.innerHTML = '<i class="fa-solid fa-microphone"></i> MANTÉN PRESIONADO PARA HABLAR';
     btnToggleMic.classList.remove('active');
-    jarvisBox.textContent = "Sistema fuera de línea.";
-    userBox.textContent = "Esperando inicio...";
+    jarvisBox.textContent = "Procesando orden...";
     setRingState('idle');
+    
     try {
-        recognition.stop();
+        recognition.stop(); // Corta el micrófono y obliga a disparar "onresult" al instante!
     } catch(e) {}
 }
 
-btnToggleMic.addEventListener('click', () => {
-    if (isSystemActive) {
-        stopSystem();
-    } else {
-        startSystem();
-    }
-});
+// Eventos estilo Walkie-Talkie (MANTENER PRESIONADO)
+btnToggleMic.addEventListener('mousedown', startSystem);
+btnToggleMic.addEventListener('mouseup', stopSystem);
+btnToggleMic.addEventListener('mouseleave', stopSystem); // Por si arrastran el mouse fuera del botón
+
+// Touch para tablets / celulares
+btnToggleMic.addEventListener('touchstart', startSystem, {passive: false});
+btnToggleMic.addEventListener('touchend', stopSystem, {passive: false});
+
 
 // Modal UI Handlers
 btnOpenModeModal.addEventListener('click', () => {
@@ -259,11 +261,5 @@ modeForm.addEventListener('submit', async (e) => {
     }
 });
 
-// Resurrección del micrófono:
-// Al abrir una pestaña nueva (como YouTube), Chrome congela la actual.
-// Al regresar el ratón o pantalla a Jarvis, forzamos que el micrófono despierte.
-window.addEventListener('focus', () => {
-    if (isSystemActive && !isJarvisSpeaking && recognition) {
-        try { recognition.start(); } catch(e){}
-    }
-});
+// ...
+
