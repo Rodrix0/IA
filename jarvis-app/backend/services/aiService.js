@@ -1,31 +1,9 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-require('dotenv').config();
-
+// Eliminamos las credenciales de Google porque ahora somos 100% locales
 let conversationHistory = [];
 
-function getGeminiClient() {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key || key === 'tu_api_key_de_gemini_aqui') {
-        return null;
-    }
-    return new GoogleGenerativeAI(key);
-}
-
 async function getAIResponse(userText, activeMode) {
-    const genAI = getGeminiClient();
-    
-    if (!genAI) {
-        return "El sistema Jarvis no tiene configurada la clave API de Gemini. Por favor, configura el archivo .env en el servidor.";
-    }
-
     try {
-        // Usamos el modelo optimizado, puedes cambiarlo a gemini-pro o gemini-1.5-flash
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.5-flash-lite"
-        });
-
-        // Compilamos todo directamente en un gran prompt de texto.
-        // Esto funciona de manera 100% segura en CUALQUIER versión de la API y modelo.
+        // En Ollama, enviamos las instrucciones directamente al motor local
         let fullPrompt = "INSTRUCCIONES DE COMPORTAMIENTO (Debes actuar siempre así):\n" + activeMode.prompt + "\n\n";
         
         if (conversationHistory.length > 0) {
@@ -38,13 +16,27 @@ async function getAIResponse(userText, activeMode) {
 
         fullPrompt += "Usuario: " + userText + "\nJarvis:";
 
-        // Llamada simple que funciona universalmente
-        const result = await model.generateContent(fullPrompt);
-        const response = await result.response;
-        const reply = response.text();
+        // Llamada a la API local de Ollama (Corre completamente en tu computadora)
+        const response = await fetch('http://127.0.0.1:11434/api/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'llama3', // Puedes cambiarlo a 'mistral' o 'phi3' si prefieres
+                prompt: fullPrompt,
+                stream: false
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ollama devolvió un error HTTP: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const reply = data.response;
 
         // Actualizar nuestro historial interno
-
         conversationHistory.push({ role: "user", content: userText });
         conversationHistory.push({ role: "assistant", content: reply });
 
@@ -55,8 +47,8 @@ async function getAIResponse(userText, activeMode) {
 
         return reply;
     } catch (error) {
-        console.error("Gemini Error:", error);
-        return "Hubo un error al procesar mi red neuronal con Gemini. Verifica la conexión a internet o tu clave API.";
+        console.error("Error Local de IA:", error.message);
+        return "Mis sistemas cognitivos están apagados. Por favor, asegúrate de que Ollama esté ejecutándose en tu computadora.";
     }
 }
 
