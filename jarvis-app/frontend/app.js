@@ -27,14 +27,26 @@ if (SpeechRecognition) {
     recognition.lang = 'es-ES'; // Idioma Español
 
     recognition.onresult = (event) => {
+        if (isJarvisSpeaking) return; // Super seguro: ignorar absolutamente todo si está hablando
+
         const current = event.resultIndex;
         const transcript = event.results[current][0].transcript.trim();
         const lowerTranscript = transcript.toLowerCase();
         
+        if (transcript.length < 2) return; // Ignorar ruidos estáticos o suspiros cortos
+
+        // Filtro anti-eco estricto: Si la frase contiene algo que Jarvis típicamente dice, ignorar
+        if (lowerTranscript.includes("iniciando proceso") || 
+            lowerTranscript.includes("abriendo") || 
+            lowerTranscript.includes("creando") ||
+            lowerTranscript.includes("jarvis responde")) {
+            return;
+        }
+
         console.log("Reconocido:", transcript);
 
         // Si el sistema está activo, escuchar
-        if (isSystemActive && !isJarvisSpeaking) {
+        if (isSystemActive) {
             userBox.textContent = `"${transcript}"`;
             jarvisBox.textContent = "Analizando directiva...";
             setRingState('listening');
@@ -244,5 +256,14 @@ modeForm.addEventListener('submit', async (e) => {
     } catch (err) {
         console.error("Error creating mode:", err);
         jarvisBox.textContent = "Error al conectar con la base de datos de modos.";
+    }
+});
+
+// Resurrección del micrófono:
+// Al abrir una pestaña nueva (como YouTube), Chrome congela la actual.
+// Al regresar el ratón o pantalla a Jarvis, forzamos que el micrófono despierte.
+window.addEventListener('focus', () => {
+    if (isSystemActive && !isJarvisSpeaking && recognition) {
+        try { recognition.start(); } catch(e){}
     }
 });
