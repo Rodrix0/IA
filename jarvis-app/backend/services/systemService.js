@@ -10,15 +10,7 @@ async function buscarEnYoutube(query) {
     
     try {
         const respuesta = await fetch(urlBusqueda);
-        const html = await respuesta.text();
-        
-        // Buscamos el ID del primer video con una expresión regular
-        const match = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/);
-        if (match) {
-            return `https://www.youtube.com/watch?v=${match[1]}`;
-        }
-        
-        // Si no encontró un video exacto (ej. un canal directo), devolver la página de búsqueda
+        // Simplemente devolvemos la URL de búsqueda en vez de forzar a abrir el primer video
         return urlBusqueda;
     } catch (error) {
         console.error("Falló la búsqueda:", error);
