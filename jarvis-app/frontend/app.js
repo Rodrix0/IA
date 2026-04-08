@@ -76,9 +76,9 @@ function speak(text, callback) {
     jarvisBox.textContent = text;
     userBox.textContent = "..."; 
 
-    // Pausar el reconocimiento mientras Jarvis habla para que no se escuche a sí mismo
+    // Fuerza a abortar el reconocimiento de voz para que no escuche el parlante
     if (recognition && isSystemActive) {
-        try { recognition.stop(); } catch(e){}
+        try { recognition.abort(); } catch(e){}
     }
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -94,18 +94,23 @@ function speak(text, callback) {
     }
 
     utterance.onend = () => {
-        isJarvisSpeaking = false;
-        if(isSystemActive) {
-            setRingState('idle');
-            try { recognition.start(); } catch(e){}
-        }
-        if (callback) callback();
+        // Agregar un retraso para evitar que el micrófono capte el "eco" final de la sala
+        setTimeout(() => {
+            isJarvisSpeaking = false;
+            if(isSystemActive) {
+                setRingState('idle');
+                try { recognition.start(); } catch(e){}
+            }
+            if (callback) callback();
+        }, 800); // 800 milisegundos de silencio
     };
 
     utterance.onerror = (e) => {
         console.error("TTS Error:", e);
-        isJarvisSpeaking = false;
-        if(isSystemActive) setRingState('idle');
+        setTimeout(() => {
+            isJarvisSpeaking = false;
+            if(isSystemActive) setRingState('idle');
+        }, 800);
     };
 
     window.speechSynthesis.speak(utterance);
