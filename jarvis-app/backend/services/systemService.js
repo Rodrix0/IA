@@ -1,28 +1,75 @@
 const { exec } = require('child_process');
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 
-function openApp(appName) {
+// --- 1. Scraper Dinámico ---
+async function buscarEnYoutube(query) {
+    const queryFormateado = encodeURIComponent(query);
+    const urlBusqueda = `https://www.youtube.com/results?search_query=${queryFormateado}`;
+    
+    try {
+        const respuesta = await fetch(urlBusqueda);
+        const html = await respuesta.text();
+        
+        // Buscamos el ID del primer video con una expresión regular
+        const match = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/);
+        if (match) {
+            return `https://www.youtube.com/watch?v=${match[1]}`;
+        }
+        
+        // Si no encontró un video exacto (ej. un canal directo), devolver la página de búsqueda
+        return urlBusqueda;
+    } catch (error) {
+        console.error("Falló la búsqueda:", error);
+    }
+    return "https://www.youtube.com"; // Fallback general
+}
+
+// --- 2. Sistema de Memoria Persistente ---
+async function procesarMemoriaDinamica(busqueda) {
+    const archivoMemoria = path.join(__dirname, '..', 'data', 'memoria.json');
+    let memoria = {};
+
+    // Nos aseguramos de que el sistema de memoria exista
+    if (!fs.existsSync(path.dirname(archivoMemoria))) {
+        fs.mkdirSync(path.dirname(archivoMemoria), { recursive: true });
+    }
+
+    // Leemos la memoria si el archivo ya existe
+    if (fs.existsSync(archivoMemoria)) {
+        try {
+            memoria = JSON.parse(fs.readFileSync(archivoMemoria, 'utf8'));
+        } catch (e) {
+            console.error("Error leyendo memoria.json:", e);
+        }
+    }
+
+    // Revisamos si ya conocemos la búsqueda (si existe en el cerebro)
+    if (memoria[busqueda]) {
+        console.log(`[Memoria Local]: Recordando link para "${busqueda}". Abriendo...`);
+        return memoria[busqueda];
+    } else {
+        console.log(`[Búsqueda Dinámica]: Navegando en internet para aprender "${busqueda}"...`);
+        
+        // Scraper actual enfocado en YouTube, en el futuro se pueden añadir otros
+        const nuevoLink = await buscarEnYoutube(busqueda);
+        
+        // Lo guardamos en el JSON para no tener que buscarlo nunca más
+        memoria[busqueda] = nuevoLink;
+        fs.writeFileSync(archivoMemoria, JSON.stringify(memoria, null, 2));
+        
+        return nuevoLink;
+    }
+}
+
+// --- 3. Ejecutor Central ---
+async function openApp(appName) {
     const platform = os.platform();
     let command = '';
-
     const lowerApp = appName.toLowerCase();
 
-    // Mapeo automático de páginas web populares (Jarvis abrirá tu navegador por defecto)
-    const websiteMap = {
-        'youtube': 'https://www.youtube.com',
-        'google': 'https://www.google.com',
-        'netflix': 'https://www.netflix.com',
-        'spotify': 'https://open.spotify.com',
-        'facebook': 'https://www.facebook.com',
-        'instagram': 'https://www.instagram.com',
-        'whatsapp': 'https://web.whatsapp.com',
-        'chat gpt': 'https://chat.openai.com',
-        'chatgpt': 'https://chat.openai.com',
-        'twitter': 'https://twitter.com'
-    };
-
-    // Mapeo de juegos o software complejo. 
-    // Si tu juego requiere una ruta exacta (ej. "C:\\Juegos\\MiJuego.exe"), ponla aquí.
+    // Mapeo básico estricto (solo palabras puras)
     const pcGamesMap = {
         'steam': 'start steam://',
         'epic games': 'start com.epicgames.launcher://',
@@ -30,63 +77,38 @@ function openApp(appName) {
         'minecraft': 'start minecraft://'
     };
 
-    let targetUrl = null;
-    let customWinCmd = null;
-
-    // Buscar si es un sitio web
-    for (const [key, url] of Object.entries(websiteMap)) {
-        if (lowerApp.includes(key)) {
-            targetUrl = url;
+    // A. ¿Es un juego/programa de la PC exacto?
+    for (const [key, cmd] of Object.entries(pcGamesMap)) {
+        if (lowerApp === key || lowerApp === `el ${key}`) {
+            command = platform === 'win32' ? cmd : `open "${key}"`;
             break;
         }
     }
 
-    // Buscar si es un juego de PC con ruta configurada
-    if (!targetUrl) {
-        for (const [key, cmd] of Object.entries(pcGamesMap)) {
-            if (lowerApp.includes(key)) {
-                customWinCmd = cmd;
-                break;
-            }
+    // B. ¿Es una aplicación nativa tradicional?
+    if (!command) {
+        if (lowerApp === 'calculadora' || lowerApp === 'calc') {
+            command = platform === 'win32' ? 'calc' : 'open -a Calculator';
+        } else if (lowerApp === 'chrome' || lowerApp === 'google chrome') {
+            command = platform === 'win32' ? 'start chrome' : 'open -a "Google Chrome"';
+        // Casos web crudos pero directos
+        } else if (lowerApp === 'youtube') {
+            command = platform === 'win32' ? `start https://youtube.com` : `open https://youtube.com`;
+        } else if (lowerApp === 'netflix') {
+            command = platform === 'win32' ? `start https://netflix.com` : `open https://netflix.com`;
+        } else if (lowerApp === 'spotify') {
+            command = platform === 'win32' ? `start https://open.spotify.com` : `open https://open.spotify.com`;
         }
     }
 
-    if (platform === 'win32') {
-        if (customWinCmd) {
-            command = customWinCmd;
-        } else if (targetUrl) {
-            command = `start ${targetUrl}`; // Abre la URL web
-        } else if (lowerApp.includes('chrome')) {
-            command = 'start chrome';
-        } else if (lowerApp.includes('calculadora') || lowerApp.includes('calc')) {
-            command = 'calc';
-        } else if (lowerApp.includes('vs code') || lowerApp.includes('code') || lowerApp.includes('visual studio')) {
-            command = 'code';
-        } else {
-            // General fallback: Intenta iniciar el ejecutable por su nombre
-            command = `start ${appName}`;
-        }
-    } else if (platform === 'darwin') {
-        if (targetUrl) {
-            command = `open ${targetUrl}`;
-        } else if (lowerApp.includes('chrome')) {
-            command = 'open -a "Google Chrome"';
-        } else if (lowerApp.includes('calculadora')) {
-            command = 'open -a Calculator';
-        } else if (lowerApp.includes('vs code') || lowerApp.includes('code')) {
-            command = 'open -a "Visual Studio Code"';
-        } else {
-            command = `open -a "${appName}"`;
-        }
-    } else {
-        // Fallback para Linux
-        if (targetUrl) {
-            command = `xdg-open ${targetUrl}`;
-        } else {
-            command = `${appName} &`;
-        }
+    // C. El núcleo de tu idea: Si es una frase desconocida ("el canal de goncho", "tutorial de java")
+    // Lo enviamos al sistema dinámico de memoria
+    if (!command) {
+        const urlObtenida = await procesarMemoriaDinamica(lowerApp);
+        command = platform === 'win32' ? `start ${urlObtenida}` : platform === 'darwin' ? `open "${urlObtenida}"` : `xdg-open "${urlObtenida}"`;
     }
 
+    // Ejecutar orden en el Sistema Operativo
     return new Promise((resolve) => {
         exec(command, (error) => {
             if (error) {
@@ -103,7 +125,6 @@ function handleSystemCommand(text) {
     let lowerText = text.toLowerCase();
 
     // Usar expresión regular para encontrar "abre [algo]" o "abrir [algo]"
-    // sin importar si el usuario dice "Jarvis abre X" o "por favor abre Y".
     const match = lowerText.match(/(?:abre|abrir) (.+)/i);
 
     if (match) {
