@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JARVIS OS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="particles-js"></div> 
+
+    <div class="hud-container">
+        <!-- HEADER -->
+        <header class="hud-header">
+            <div class="logo">
+                <i class="fa-solid fa-microchip"></i> JARVIS <span>OS</span>
+            </div>
+            <div class="system-status">
+                <span class="status-dot"></span> Online
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <main class="main-layout">
+            
+            <!-- LEFT PANEL: MODES -->
+            <aside class="side-panel modes-panel">
+                <h3><i class="fa-solid fa-layer-group"></i> Modos de Operación</h3>
+                <ul id="modes-list" class="mode-list">
+                    <!-- Dinámico -->
+                </ul>
+                <button id="btn-open-mode-modal" class="action-btn mt-10">
+                    <i class="fa-solid fa-plus"></i> Crear Nuevo Modo
+                </button>
+            </aside>
+
+            <!-- CENTER PANEL: AI INTERFACE -->
+            <section class="center-panel">
+                
+                <div class="visualizer-container">
+                    <div id="listening-ring" class="ring idle">
+                        <div class="core">
+                            <i id="mic-icon" class="fa-solid fa-microphone-lines"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="transcript-box">
+                    <div id="user-transcript" class="user-text">Esperando interacción...</div>
+                    <div id="jarvis-response" class="jarvis-text">Sistema Jarvis. Inicia el sistema para interactuar.</div>
+                </div>
+
+                <div class="controls">
+                    <button id="btn-toggle-mic" class="power-btn">
+                        <i class="fa-solid fa-power-off"></i> INICIAR SISTEMA
+                    </button>
+                </div>
+
+            </section>
+        </main>
+    </div>
+
+    <!-- MODAL: CREAR MODO -->
+    <div id="mode-modal" class="modal hidden">
+        <div class="modal-content glass-panel">
+            <span id="close-modal" class="close">&times;</span>
+            <h2>Nuevo Modo de IA</h2>
+            <form id="mode-form">
+                <div class="form-group">
+                    <label for="mode-name">Nombre del Modo:</label>
+                    <input type="text" id="mode-name" required placeholder="Ej: Modo Hacker">
+                </div>
+                <div class="form-group">
+                    <label for="mode-desc">Descripción (Propósito del modo):</label>
+                    <textarea id="mode-desc" required placeholder="Ej: Respuestas con tono sarcástico y enfocado en ciberseguridad..."></textarea>
+                </div>
+                <button type="submit" class="action-btn w-100">Guardar en Base de Datos</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Socket.io -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
