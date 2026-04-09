@@ -8,6 +8,8 @@ require('dotenv').config();
 const modeService = require('./services/modeService');
 const systemService = require('./services/systemService');
 const aiService = require('./services/aiService');
+const backgroundTuner = require('./services/backgroundTuner');
+const observerService = require('./services/observerService');
 
 const app = express();
 const server = http.createServer(app);
@@ -58,8 +60,19 @@ io.on('connection', (socket) => {
         let actionPayload = null;
 
         try {
+            // 0. Toggle de Observador/Estudio Activo
+            if (lowerText.includes('activar observador') || lowerText.includes('activa modo estudio activo') || lowerText.includes('activa observación') || lowerText.includes('activa observacion') || lowerText.includes('inicia modo estudio activo') || lowerText.includes('activa el observador')) {
+                observerService.toggleObserver(true);
+                responseText = "Modo Estudio Activo habilitado. He activado mi red de escaneo neuromotriz; a partir de ahora analizaré tus ventanas para brindarte ayuda contextual.";
+                action = "OBSERVER_ON";
+            } 
+            else if (lowerText.includes('desactivar observador') || lowerText.includes('apaga observacion') || lowerText.includes('apaga observación') || lowerText.includes('desactiva modo estudio activo') || lowerText.includes('apaga el observador')) {
+                observerService.toggleObserver(false);
+                responseText = "Modo Estudio Activo deshabilitado. Mis ojos locales sobre el sistema operativo han sido apagados.";
+                action = "OBSERVER_OFF";
+            }
             // 1. Detección de comandos específicos
-            if (lowerText.includes('abrir menú de carga de modos') || lowerText.includes('crear modo') || lowerText.includes('nuevo modo')) {
+            else if (lowerText.includes('abrir menú de carga de modos') || lowerText.includes('crear modo') || lowerText.includes('nuevo modo')) {
                 responseText = "Abriendo el panel de creación de modalidades.";
                 action = "OPEN_MODE_MENU";
             } 
@@ -85,11 +98,21 @@ io.on('connection', (socket) => {
                 }
             }
             else {
-                // 2. Comandos de sistema (Abrir apps)
+                // 2. Comandos de sistema (Abrir apps y Entrenamientos)
                 const sysCommand = systemService.handleSystemCommand(text);
-                if (sysCommand.isSystemCommand) {
-                    responseText = `Iniciando proceso: Abriendo ${sysCommand.appName}, señor.`;
-                    const success = await systemService.openApp(sysCommand.appName);
+                
+                if (sysCommand.isTraining) {
+                    systemService.saveCustomCommand(sysCommand.trigger, sysCommand.appName);
+                    responseText = `Entendido. A partir de ahora, cuando me digas "${sysCommand.trigger}", abriré ${sysCommand.appName}.`;
+                    action = "TRAINING_SAVED";
+                }
+                else if (sysCommand.isSystemCommand) {
+                    responseText = sysCommand.isLearned
+                        ? `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`
+                        : `Iniciando proceso: Abriendo ${sysCommand.appName}, señor.`;
+                        
+                    const activeMode = modeService.getActiveMode();
+                    const success = await systemService.openApp(sysCommand.appName, activeMode.id);
                     if (!success) {
                         responseText = `Hubo un inconveniente al intentar abrir la aplicación ${sysCommand.appName}.`;
                     }
@@ -97,7 +120,8 @@ io.on('connection', (socket) => {
                 // 3. Respuesta de IA (Cerebro)
                 else {
                     const activeMode = modeService.getActiveMode();
-                    responseText = await aiService.getAIResponse(text, activeMode);
+                    const screenContext = observerService.getScreenContext();
+                    responseText = await aiService.getAIResponse(text, activeMode, screenContext);
                 }
             }
 
@@ -128,4 +152,7 @@ server.listen(PORT, () => {
     console.log(`  JARVIS VIRTUAL ASSISTANT - BACKEND ACTIVE`);
     console.log(`  => Server running on http://localhost:${PORT}`);
     console.log(`===========================================\n`);
+    
+    // Iniciar el estudio automático en segundo plano
+    backgroundTuner.startBackgroundStudying();
 });

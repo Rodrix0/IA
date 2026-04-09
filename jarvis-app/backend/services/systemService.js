@@ -3,6 +3,29 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
+// --- 0. Sistema de Comandos de Entrenamiento ---
+const customCommandsFile = path.join(__dirname, '..', 'data', 'comandos.json');
+
+function saveCustomCommand(triggerPhrase, targetApp) {
+    let commands = {};
+    if (!fs.existsSync(path.dirname(customCommandsFile))) {
+        fs.mkdirSync(path.dirname(customCommandsFile), { recursive: true });
+    }
+    if (fs.existsSync(customCommandsFile)) {
+        try {
+            commands = JSON.parse(fs.readFileSync(customCommandsFile, 'utf8'));
+        } catch (e) { console.error("Error leyendo comandos.json:", e); }
+    }
+    
+    // Limpiar puntuación del trigger para coincidencias más fáciles
+    let cleanTrigger = triggerPhrase.toLowerCase().replace(/['".,?!]/g, '').trim();
+    let cleanTarget = targetApp.toLowerCase().trim();
+    
+    commands[cleanTrigger] = cleanTarget;
+    fs.writeFileSync(customCommandsFile, JSON.stringify(commands, null, 2));
+}
+
+
 // --- 1. Scraper Dinámico ---
 async function buscarEnYoutube(query) {
     const queryFormateado = encodeURIComponent(query);
@@ -19,7 +42,7 @@ async function buscarEnYoutube(query) {
 }
 
 // --- 2. Sistema de Memoria Persistente ---
-async function procesarMemoriaDinamica(busqueda) {
+async function procesarMemoriaDinamica(busqueda, modeId) {
     const archivoMemoria = path.join(__dirname, '..', 'data', 'memoria.json');
     let memoria = {};
 
@@ -37,32 +60,50 @@ async function procesarMemoriaDinamica(busqueda) {
         }
     }
 
-    // Revisamos si ya conocemos la búsqueda (si existe en el cerebro)
-    if (memoria[busqueda]) {
+    // Revisamos si ya conocemos la búsqueda y NO interfiere con el contexto
+    // Para evitar que "chat gpt" guardado abra youtube si antes falló, usamos claves con prefijo de modo
+    const claveMemoria = `${modeId}_${busqueda}`;
+
+    if (memoria[claveMemoria]) {
         console.log(`[Memoria Local]: Recordando link para "${busqueda}". Abriendo...`);
-        return memoria[busqueda];
+        return memoria[claveMemoria];
     } else {
         console.log(`[Búsqueda Dinámica]: Navegando en internet para aprender "${busqueda}"...`);
         
         let nuevoLink;
         
-        // Enrutador inteligente: ¿Quiere información web o videos?
-        if (busqueda.includes('información') || busqueda.includes('informacion') || busqueda.includes('google')) {
-            // Limpia un poco la frase para no buscar literalmente 'informacion sobre X' en Google
+        // Enrutador inteligente avanzado (con consciencia de MODO):
+        // 1. Si pide ChatGPT o Gemini EXPLÍCITAMENTE
+        if (busqueda.includes('chat gpt') || busqueda.includes('chatgpt') || busqueda.includes('en chat') || busqueda.includes('con chat')) {
+            let promptBase = busqueda.replace(/chat gpt|chatgpt|en chat|con chat|busca en|busca|y me busque sobre|y busca sobre/gi, '').trim();
+            if (promptBase.length > 2) {
+                nuevoLink = `https://chat.openai.com/?q=${encodeURIComponent(promptBase)}`;
+            } else {
+                nuevoLink = 'https://chat.openai.com';
+            }
+        } else if (busqueda.includes('gemini')) {
+            nuevoLink = 'https://gemini.google.com';
+        } 
+        // 2. Si estamos en modo ESTUDIO o pide INFORMACION
+        else if (modeId === 'estudio' || busqueda.includes('información') || busqueda.includes('informacion') || busqueda.includes('google')) {
             let queryLimpio = busqueda
-                .replace('información sobre', '').replace('informacion sobre', '')
-                .replace('información de', '').replace('informacion de', '')
-                .replace('información', '').replace('informacion', '')
-                .replace('en google', '').trim();
+                .replace(/información sobre|informacion sobre|información de|informacion de|información|informacion|en google/gi, '')
+                .trim();
             
-            nuevoLink = `https://www.google.com/search?q=${encodeURIComponent(queryLimpio)}`;
-        } else {
-            // Scraper actual enfocado en YouTube para todo el resto
+            // Si el query quedó super corto y estamos en estudio, los mandamos a ChatGPT por defecto
+            if (queryLimpio.length < 3 && modeId === 'estudio') {
+                nuevoLink = 'https://chat.openai.com';
+            } else {
+                nuevoLink = `https://www.google.com/search?q=${encodeURIComponent(queryLimpio)}`;
+            }
+        } 
+        // 3. Default: Youtube (Ideal para modo productividad o juego)
+        else {
             nuevoLink = await buscarEnYoutube(busqueda);
         }
         
         // Lo guardamos en el JSON para no tener que buscarlo nunca más
-        memoria[busqueda] = nuevoLink;
+        memoria[claveMemoria] = nuevoLink;
         fs.writeFileSync(archivoMemoria, JSON.stringify(memoria, null, 2));
         
         return nuevoLink;
@@ -70,7 +111,7 @@ async function procesarMemoriaDinamica(busqueda) {
 }
 
 // --- 3. Ejecutor Central ---
-async function openApp(appName) {
+async function openApp(appName, modeId = 'productividad') {
     const platform = os.platform();
     let command = '';
     const lowerApp = appName.toLowerCase();
@@ -79,9 +120,12 @@ async function openApp(appName) {
         'youtube': 'https://www.youtube.com',
         'google': 'https://www.google.com',
         'netflix': 'https://www.netflix.com',
+        'crunchy': 'https://www.crunchyroll.com',
+        'crunchyroll': 'https://www.crunchyroll.com',
         'spotify': 'https://open.spotify.com',
         'chat gpt': 'https://chat.openai.com',
         'chatgpt': 'https://chat.openai.com',
+        'chat': 'https://chat.openai.com',
         'gemini': 'https://gemini.google.com'
     };
 
@@ -89,6 +133,8 @@ async function openApp(appName) {
         'steam': 'start steam://',
         'epic games': 'start com.epicgames.launcher://',
         'league of legends': 'start "" "C:\\Riot Games\\Riot Client\\RiotClientServices.exe" --launch-product=league_of_legends --launch-patchline=live',
+        'lol': 'start "" "C:\\Riot Games\\Riot Client\\RiotClientServices.exe" --launch-product=league_of_legends --launch-patchline=live',
+        'valorant': 'start "" "C:\\Riot Games\\Riot Client\\RiotClientServices.exe" --launch-product=valorant --launch-patchline=live',
         'minecraft': 'start minecraft://'
     };
 
@@ -100,11 +146,35 @@ async function openApp(appName) {
         }
     }
 
-    // B. ¿Es una aplicación nativa tradicional?
+    // B. ¿Es una aplicación nativa tradicional o herramientas de la PC?
+    const localAppsMap = {
+        'calculadora': 'calc',
+        'calc': 'calc',
+        'bloc de notas': 'notepad',
+        'notepad': 'notepad',
+        'word': 'winword',
+        'excel': 'excel',
+        'paint': 'mspaint',
+        'administrador de tareas': 'taskmgr',
+        'visual studio code': 'code',
+        'visual studio': 'code',
+        'visual': 'code',
+        'vscode': 'code',
+        'antygravity': 'antigravity',
+        'antigravity': 'antigravity'
+    };
+
     if (!command) {
-        if (lowerApp.includes('calculadora') || lowerApp.includes('calc')) {
-            command = platform === 'win32' ? 'calc' : 'open -a Calculator';
-        } else if (lowerApp.includes('chrome') || lowerApp.includes('google chrome')) {
+        for (const [key, cmd] of Object.entries(localAppsMap)) {
+            if (lowerApp.includes(key) || lowerApp === key) {
+                command = platform === 'win32' ? cmd : `open -a "${key}"`;
+                break;
+            }
+        }
+    }
+
+    if (!command) {
+        if (lowerApp.includes('chrome') || lowerApp.includes('google chrome')) {
             command = platform === 'win32' ? 'start chrome' : 'open -a "Google Chrome"';
         // Casos web exactos (si la frase contiene "chat gpt", etc.)
         } else {
@@ -120,7 +190,7 @@ async function openApp(appName) {
     // C. El núcleo de tu idea: Si es una frase desconocida ("el canal de goncho", "tutorial de java")
     // Lo enviamos al sistema dinámico de memoria
     if (!command) {
-        const urlObtenida = await procesarMemoriaDinamica(lowerApp);
+        const urlObtenida = await procesarMemoriaDinamica(lowerApp, modeId);
         // IMPORTANTE: En Windows, usamos start "" "URL" para que la consola no explote con caracteres especiales
         command = platform === 'win32' ? `start "" "${urlObtenida}"` : platform === 'darwin' ? `open "${urlObtenida}"` : `xdg-open "${urlObtenida}"`;
     }
@@ -139,24 +209,49 @@ async function openApp(appName) {
 }
 
 function handleSystemCommand(text) {
-    let lowerText = text.toLowerCase();
+    let lowerText = text.toLowerCase().trim();
+    let cleanText = lowerText.replace(/['".,?!]/g, '').trim();
 
-    // Usar expresión regular para encontrar comandos de acción expansivos
-    const match = lowerText.match(/(?:abre|abrir|ir a|ve a|busca|buscar|búscame|búsqueda|preguntale a) (.+)/i);
+    // 1. Detectar INTENCIÓN DE ENTRENAMIENTO
+    // Ej: "cuando te diga hora de pelis quiero que abras netflix"
+    const trainMatch = cleanText.match(/(?:cuando|si) te (?:diga|digo) (.+?) (?:quiero que|abre|abrir|ejecuta|ejecutes|ve a|vayas a|pongas) (.+)/i);
+    if (trainMatch) {
+        let trigger = trainMatch[1].trim();
+        let app = trainMatch[2].trim();
+        // Evitamos auto-bucle con la palabra Jarvis
+        trigger = trigger.replace(/^jarvis /i, '');
+        return { isTraining: true, trigger: trigger, appName: app };
+    }
+
+    // 2. Detectar si es un COMANDO YA ENTRENADO en comandos.json
+    if (fs.existsSync(customCommandsFile)) {
+        try {
+            const commands = JSON.parse(fs.readFileSync(customCommandsFile, 'utf8'));
+            for (const [trigger, target] of Object.entries(commands)) {
+                // Si el usuario dijo exactamente el trigger (o lo contiene como frase aislada)
+                if (cleanText.includes(trigger)) {
+                    return { isSystemCommand: true, appName: target, isLearned: true };
+                }
+            }
+        } catch (e) { console.error("Error leyendo cmds:", e); }
+    }
+
+    // 3. Extracción estándar de comandos del sistema
+    const match = lowerText.match(/(?:abre|abrir|ir a|ve a|busca|buscar|búscame|búsqueda|preguntale a|pon|ponme|reproduce) (.+)/i);
 
     if (match) {
         let appToOpen = match[1].trim();
-        // Limpiar puntos finales típicos del reconocimiento de voz
         if (appToOpen.endsWith('.')) {
             appToOpen = appToOpen.slice(0, -1);
         }
-        return { isSystemCommand: true, appName: appToOpen };
+        return { isSystemCommand: true, appName: appToOpen, isLearned: false };
     }
 
-    return { isSystemCommand: false };
+    return { isSystemCommand: false, isTraining: false };
 }
 
 module.exports = {
     openApp,
-    handleSystemCommand
+    handleSystemCommand,
+    saveCustomCommand
 };
