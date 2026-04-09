@@ -1,11 +1,16 @@
 // Eliminamos las credenciales de Google porque ahora somos 100% locales
 let conversationHistory = [];
 
-async function getAIResponse(userText, activeMode) {
+async function getAIResponse(userText, activeMode, screenContext = null) {
     try {
         // En Ollama, enviamos las instrucciones directamente al motor local
         let fullPrompt = "INSTRUCCIONES DE COMPORTAMIENTO (Debes actuar siempre así):\n" + activeMode.prompt + "\n\n";
         
+        // Si el observador de pantalla detectó en qué andas metido:
+        if (screenContext) {
+            fullPrompt += screenContext + "\n\n";
+        }
+
         if (conversationHistory.length > 0) {
             fullPrompt += "HISTORIAL DE CONVERSACIÓN RECIENTE:\n";
             conversationHistory.forEach(msg => {
