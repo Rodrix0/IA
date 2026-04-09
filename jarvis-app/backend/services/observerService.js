@@ -3,16 +3,29 @@ const path = require('path');
 const fs = require('fs');
 
 let isObserving = false;
-let screenBreadcrumbs = []; // Mantiene las últimas 5 cosas únicas que miraste
+let screenBreadcrumbs = []; 
 let pollingInterval = null;
 
-// Verifica si la carpeta de scripts existe, y si no, debería estar hecha por el paso anterior
+// Verifica si la carpeta de scripts y data existen
 const scriptsDir = path.join(__dirname, '..', 'scripts');
-if (!fs.existsSync(scriptsDir)) {
-    fs.mkdirSync(scriptsDir, { recursive: true });
-}
+const dataDir = path.join(__dirname, '..', 'data');
+if (!fs.existsSync(scriptsDir)) fs.mkdirSync(scriptsDir, { recursive: true });
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const psClientPath = path.join(scriptsDir, 'getActiveWindow.ps1');
+const observacionPath = path.join(dataDir, 'historial_observador.json');
+
+// Cargar historial previo si existe para una memoria y aprendizaje a largo plazo
+if (fs.existsSync(observacionPath)) {
+    try { screenBreadcrumbs = JSON.parse(fs.readFileSync(observacionPath, 'utf8')); } catch (e) { screenBreadcrumbs = []; }
+}
+
+function saveObserverHistory() {
+    // Guardar asincrónicamente para no trabar el proceso
+    fs.writeFile(observacionPath, JSON.stringify(screenBreadcrumbs, null, 2), (err) => {
+        if (err) console.error("[Observer] Error guardando historial:", err);
+    });
+}
 
 function toggleObserver(state) {
     if (state === undefined) {
@@ -23,14 +36,14 @@ function toggleObserver(state) {
 
     if (isObserving) {
         if (!pollingInterval) {
-            console.log("\n[👁️  Observer] MODO OBSERVADOR ACTIVADO. Jarvis comenzó a mirar las ventanas...");
-            pollingInterval = setInterval(pollActiveWindow, 5000); // Lee la pantalla cada 5 segundos
+            console.log("\n[👁️  Observer] MODO OBSERVADOR PERMANENTE ACTIVADO. Jarvis está aprendiendo toda tu actividad...");
+            pollingInterval = setInterval(pollActiveWindow, 5000); 
         }
     } else {
         if (pollingInterval) {
             clearInterval(pollingInterval);
             pollingInterval = null;
-            console.log("\n[👀 Observer] MODO OBSERVADOR APAGADO. Privacidad restaurada.");
+            console.log("\n[👀 Observer] MODO OBSERVADOR APAGADO.");
         }
     }
     return isObserving;
@@ -40,23 +53,23 @@ function pollActiveWindow() {
     execFile('powershell', ['-ExecutionPolicy', 'Bypass', '-File', psClientPath], (error, stdout) => {
         if (!error && stdout) {
             let activeTitle = stdout.trim();
-            // Ignoramos cadenas vacías, la terminal del server o procesos nativos invisibles
             if (activeTitle.length > 2 && 
                 !activeTitle.includes("npm") && 
                 !activeTitle.includes("powershell") && 
                 activeTitle !== "Windows Input Experience" && 
                 activeTitle !== "Program Manager") {
                 
-                let lastAdded = screenBreadcrumbs[screenBreadcrumbs.length - 1];
+                // Obtener el título del último objeto que miró (evitando doble registro seguido)
+                let lastAdded = screenBreadcrumbs.length > 0 ? screenBreadcrumbs[screenBreadcrumbs.length - 1].title : null;
                 
-                // Si la ventana cambió y no es la misma que ya estamos mirando
                 if (lastAdded !== activeTitle) {
-                    screenBreadcrumbs.push(activeTitle);
+                    screenBreadcrumbs.push({
+                        time: new Date().toISOString(),
+                        title: activeTitle
+                    });
                     
-                    // Solo guardamos un buffer de las últimas 6 actividades
-                    if (screenBreadcrumbs.length > 6) {
-                        screenBreadcrumbs.shift(); 
-                    }
+                    // Almacenamiento Permanente Masivo
+                    saveObserverHistory();
                 }
             }
         }
@@ -64,11 +77,13 @@ function pollActiveWindow() {
 }
 
 function getScreenContext() {
-    if (!isObserving || screenBreadcrumbs.length === 0) return null;
+    if (screenBreadcrumbs.length === 0) return null;
     
-    // Obtenemos el registro en reverso (de más actual hacia pasado)
-    const contextStr = [...screenBreadcrumbs].reverse().join(" | ");
-    return `IMPORTANTE: Estoy activamente observando la pantalla del usuario en Windows. Sus ventanas recientes son de más a menos recientes: [ ${contextStr} ]. Usa este contexto si me pregunta sobre 'esto', 'aquello', 'qué estoy viendo' o pide acciones sin darte el objeto explícito.`;
+    // Para que la IA no se vuelva loca procesando miles de líneas al instante cuando le hablas hoy,
+    // le pasamos tus últimas 15 interacciones como un resumen súper enfocado de tu contexto actual y de las horas recientes.
+    const historialReciente = screenBreadcrumbs.slice(-15).reverse().map(item => item.title).join(" | ");
+
+    return `IMPORTANTE: Tengo acceso al historial fotográfico permanente de las ventanas del software del usuario. Las ventanas más recientes que ha estado viendo (de la más actual a las pasadas horas) son: [ ${historialReciente} ]. Usa este conocimiento para saber sus hábitos o a qué se refiere si menciona algo vago.`;
 }
 
 module.exports = {
