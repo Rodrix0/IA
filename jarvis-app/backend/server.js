@@ -11,6 +11,7 @@ const aiService = require('./services/aiService');
 const backgroundTuner = require('./services/backgroundTuner');
 const observerService = require('./services/observerService');
 const appDiscoveryService = require('./services/appDiscoveryService');
+const hotkeyService = require('./services/hotkeyService');
 
 const app = express();
 const server = http.createServer(app);
@@ -161,4 +162,6 @@ server.listen(PORT, () => {
     backgroundTuner.startBackgroundStudying();
     // Iniciar el indexador de accesos directos
     appDiscoveryService.triggerBackgroundScan();
+    // Conectar el gancho USB/Teclado físico
+    hotkeyService.initHotkeyService(io);
 });

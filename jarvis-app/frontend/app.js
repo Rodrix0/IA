@@ -153,6 +153,14 @@ socket.on('response', (data) => {
     });
 });
 
+socket.on('global_hotkey_down', () => {
+    startSystem();
+});
+
+socket.on('global_hotkey_up', () => {
+    stopSystem();
+});
+
 // --- UI Logic ---
 function renderModes(modes, activeId) {
     modesList.innerHTML = '';

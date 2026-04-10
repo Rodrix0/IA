@@ -128,7 +128,13 @@ async function openApp(appName, modeId = 'productividad') {
         'chat': 'https://chat.openai.com',
         'gemini': 'https://gemini.google.com',
         'whatsapp': 'https://web.whatsapp.com',
-        'whatsapp web': 'https://web.whatsapp.com'
+        'whatsapp web': 'https://web.whatsapp.com',
+        'campus ucp': 'https://campus.ucp.edu.ar',
+        'campus': 'https://campus.ucp.edu.ar',
+        'sistema ucp': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx',
+        'sistema cuenca': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx',
+        'mis notas': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx',
+        'notas ucp': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx'
     };
 
     const pcGamesMap = {
@@ -150,20 +156,14 @@ async function openApp(appName, modeId = 'productividad') {
         }
     }
 
-    // B. ¿Es una aplicación nativa tradicional o herramientas de la PC?
+    // B. ¿Es una aplicación del núcleo de Windows puro? (Garantizadas globalmente)
     const localAppsMap = {
         'calculadora': 'calc',
         'calc': 'calc',
         'bloc de notas': 'notepad',
         'notepad': 'notepad',
-        'word': 'winword',
-        'excel': 'excel',
         'paint': 'mspaint',
-        'administrador de tareas': 'taskmgr',
-        'visual studio code': 'code',
-        'visual studio': 'code',
-        'visual': 'code',
-        'vscode': 'code'
+        'administrador de tareas': 'taskmgr'
     };
 
     if (!command) {
