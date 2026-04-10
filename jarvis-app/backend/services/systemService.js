@@ -114,7 +114,7 @@ async function procesarMemoriaDinamica(busqueda, modeId) {
 async function openApp(appName, modeId = 'productividad') {
     const platform = os.platform();
     let command = '';
-    const lowerApp = appName.toLowerCase();
+    const lowerApp = appName.toLowerCase().trim();
 
     const websiteMap = {
         'youtube': 'https://www.youtube.com',
@@ -122,7 +122,6 @@ async function openApp(appName, modeId = 'productividad') {
         'netflix': 'https://www.netflix.com',
         'crunchy': 'https://www.crunchyroll.com',
         'crunchyroll': 'https://www.crunchyroll.com',
-        'spotify': 'https://open.spotify.com',
         'chat gpt': 'https://chat.openai.com',
         'chatgpt': 'https://chat.openai.com',
         'chat': 'https://chat.openai.com',
@@ -131,6 +130,8 @@ async function openApp(appName, modeId = 'productividad') {
 
     const pcGamesMap = {
         'steam': 'start steam://',
+        'spotify': 'start spotify:',
+        'discord': 'start discord:',
         'epic games': 'start com.epicgames.launcher://',
         'league of legends': 'start "" "C:\\Riot Games\\Riot Client\\RiotClientServices.exe" --launch-product=league_of_legends --launch-patchline=live',
         'lol': 'start "" "C:\\Riot Games\\Riot Client\\RiotClientServices.exe" --launch-product=league_of_legends --launch-patchline=live',
@@ -138,9 +139,9 @@ async function openApp(appName, modeId = 'productividad') {
         'minecraft': 'start minecraft://'
     };
 
-    // A. ¿Es un juego/programa de la PC exacto?
+    // A. ¿Es un juego/programa nativo exacto?
     for (const [key, cmd] of Object.entries(pcGamesMap)) {
-        if (lowerApp.includes(key) || lowerApp === `el ${key}`) {
+        if (lowerApp === key || lowerApp === `el ${key}` || lowerApp.includes(key)) {
             command = platform === 'win32' ? cmd : `open "${key}"`;
             break;
         }
@@ -159,14 +160,12 @@ async function openApp(appName, modeId = 'productividad') {
         'visual studio code': 'code',
         'visual studio': 'code',
         'visual': 'code',
-        'vscode': 'code',
-        'antygravity': 'antigravity',
-        'antigravity': 'antigravity'
+        'vscode': 'code'
     };
 
     if (!command) {
         for (const [key, cmd] of Object.entries(localAppsMap)) {
-            if (lowerApp.includes(key) || lowerApp === key) {
+            if (lowerApp === key || lowerApp === `el ${key}` || lowerApp.includes(key)) {
                 command = platform === 'win32' ? cmd : `open -a "${key}"`;
                 break;
             }
@@ -176,7 +175,7 @@ async function openApp(appName, modeId = 'productividad') {
     if (!command) {
         if (lowerApp.includes('chrome') || lowerApp.includes('google chrome')) {
             command = platform === 'win32' ? 'start chrome' : 'open -a "Google Chrome"';
-        // Casos web exactos (si la frase contiene "chat gpt", etc.)
+        // Casos web exactos
         } else {
             for (const [siteName, url] of Object.entries(websiteMap)) {
                 if (lowerApp.includes(siteName) && lowerApp.length < siteName.length + 5) {
@@ -187,12 +186,15 @@ async function openApp(appName, modeId = 'productividad') {
         }
     }
 
-    // C. El núcleo de tu idea: Si es una frase desconocida ("el canal de goncho", "tutorial de java")
-    // Lo enviamos al sistema dinámico de memoria
+    // C. El núcleo: Si es una frase desconocida ("el canal de goncho") lo enviamos a memoria
+    // A menos que sea una URL cruda aprendida
     if (!command) {
-        const urlObtenida = await procesarMemoriaDinamica(lowerApp, modeId);
-        // IMPORTANTE: En Windows, usamos start "" "URL" para que la consola no explote con caracteres especiales
-        command = platform === 'win32' ? `start "" "${urlObtenida}"` : platform === 'darwin' ? `open "${urlObtenida}"` : `xdg-open "${urlObtenida}"`;
+        if (lowerApp.startsWith("http")) {
+            command = platform === 'win32' ? `start "" "${lowerApp}"` : platform === 'darwin' ? `open "${lowerApp}"` : `xdg-open "${lowerApp}"`;
+        } else {
+            const urlObtenida = await procesarMemoriaDinamica(lowerApp, modeId);
+            command = platform === 'win32' ? `start "" "${urlObtenida}"` : platform === 'darwin' ? `open "${urlObtenida}"` : `xdg-open "${urlObtenida}"`;
+        }
     }
 
     // Ejecutar orden en el Sistema Operativo
@@ -218,24 +220,10 @@ function handleSystemCommand(text) {
     if (trainMatch) {
         let trigger = trainMatch[1].trim();
         let app = trainMatch[2].trim();
-        // Evitamos auto-bucle con la palabra Jarvis
         trigger = trigger.replace(/^jarvis /i, '');
         return { isTraining: true, trigger: trigger, appName: app };
     }
-
-    // 2. Detectar si es un COMANDO YA ENTRENADO en comandos.json
-    if (fs.existsSync(customCommandsFile)) {
-        try {
-            const commands = JSON.parse(fs.readFileSync(customCommandsFile, 'utf8'));
-            for (const [trigger, target] of Object.entries(commands)) {
-                // Si el usuario dijo exactamente el trigger (o lo contiene como frase aislada)
-                if (cleanText.includes(trigger)) {
-                    return { isSystemCommand: true, appName: target, isLearned: true };
-                }
-            }
-        } catch (e) { console.error("Error leyendo cmds:", e); }
-    }
-
+    
     // 3. Extracción estándar de comandos del sistema
     const match = lowerText.match(/(?:abre|abrir|ir a|ve a|busca|buscar|búscame|búsqueda|preguntale a|pon|ponme|reproduce) (.+)/i);
 
@@ -244,7 +232,30 @@ function handleSystemCommand(text) {
         if (appToOpen.endsWith('.')) {
             appToOpen = appToOpen.slice(0, -1);
         }
+        
+        // 2. Detectar si la orden concreta es un COMANDO YA ENTRENADO por la red neuronal
+        // Se hace después del Regex general para capturar exactamente "lo que se quiere buscar" en lugar de hacer match al azar en medio de la frase
+        if (fs.existsSync(customCommandsFile)) {
+            try {
+                const commands = JSON.parse(fs.readFileSync(customCommandsFile, 'utf8'));
+                // Comprobar coincidencia exacta contra los entrenados
+                if (commands[appToOpen]) {
+                    return { isSystemCommand: true, appName: commands[appToOpen], isLearned: true };
+                }
+            } catch (e) { console.error("Error leyendo cmds:", e); }
+        }
+
         return { isSystemCommand: true, appName: appToOpen, isLearned: false };
+    }
+
+    // Comprobación secundaria: Por si dijo directo un comando entrenado y sin el verbo "Abre"
+    if (fs.existsSync(customCommandsFile)) {
+        try {
+            const commands = JSON.parse(fs.readFileSync(customCommandsFile, 'utf8'));
+            if (commands[cleanText]) {
+                return { isSystemCommand: true, appName: commands[cleanText], isLearned: true };
+            }
+        } catch (e) { }
     }
 
     return { isSystemCommand: false, isTraining: false };
