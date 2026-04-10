@@ -17,11 +17,11 @@ function saveCustomCommand(triggerPhrase, targetApp) {
             commands = JSON.parse(fs.readFileSync(customCommandsFile, 'utf8'));
         } catch (e) { console.error("Error leyendo comandos.json:", e); }
     }
-    
+
     // Limpiar puntuación del trigger para coincidencias más fáciles
     let cleanTrigger = triggerPhrase.toLowerCase().replace(/['".,?!]/g, '').trim();
     let cleanTarget = targetApp.toLowerCase().trim();
-    
+
     commands[cleanTrigger] = cleanTarget;
     fs.writeFileSync(customCommandsFile, JSON.stringify(commands, null, 2));
 }
@@ -31,7 +31,7 @@ function saveCustomCommand(triggerPhrase, targetApp) {
 async function buscarEnYoutube(query) {
     const queryFormateado = encodeURIComponent(query);
     const urlBusqueda = `https://www.youtube.com/results?search_query=${queryFormateado}`;
-    
+
     try {
         const respuesta = await fetch(urlBusqueda);
         // Simplemente devolvemos la URL de búsqueda en vez de forzar a abrir el primer video
@@ -70,9 +70,9 @@ async function procesarMemoriaDinamica(busqueda, modeId) {
         return memoria[claveMemoria];
     } else {
         console.log(`[Búsqueda Dinámica]: Navegando en internet para aprender "${busqueda}"...`);
-        
+
         let nuevoLink;
-        
+
         // Enrutador inteligente avanzado (con consciencia de MODO):
         // 1. Si pide ChatGPT o Gemini EXPLÍCITAMENTE
         if (busqueda.includes('chat gpt') || busqueda.includes('chatgpt') || busqueda.includes('en chat') || busqueda.includes('con chat')) {
@@ -84,29 +84,29 @@ async function procesarMemoriaDinamica(busqueda, modeId) {
             }
         } else if (busqueda.includes('gemini')) {
             nuevoLink = 'https://gemini.google.com';
-        } 
+        }
         // 2. Si estamos en modo ESTUDIO o pide INFORMACION
         else if (modeId === 'estudio' || busqueda.includes('información') || busqueda.includes('informacion') || busqueda.includes('google')) {
             let queryLimpio = busqueda
                 .replace(/información sobre|informacion sobre|información de|informacion de|información|informacion|en google/gi, '')
                 .trim();
-            
+
             // Si el query quedó super corto y estamos en estudio, los mandamos a ChatGPT por defecto
             if (queryLimpio.length < 3 && modeId === 'estudio') {
                 nuevoLink = 'https://chat.openai.com';
             } else {
                 nuevoLink = `https://www.google.com/search?q=${encodeURIComponent(queryLimpio)}`;
             }
-        } 
+        }
         // 3. Default: Youtube (Ideal para modo productividad o juego)
         else {
             nuevoLink = await buscarEnYoutube(busqueda);
         }
-        
+
         // Lo guardamos en el JSON para no tener que buscarlo nunca más
         memoria[claveMemoria] = nuevoLink;
         fs.writeFileSync(archivoMemoria, JSON.stringify(memoria, null, 2));
-        
+
         return nuevoLink;
     }
 }
@@ -126,7 +126,9 @@ async function openApp(appName, modeId = 'productividad') {
         'chat gpt': 'https://chat.openai.com',
         'chatgpt': 'https://chat.openai.com',
         'chat': 'https://chat.openai.com',
-        'gemini': 'https://gemini.google.com'
+        'gemini': 'https://gemini.google.com',
+        'whatsapp': 'https://web.whatsapp.com',
+        'whatsapp web': 'https://web.whatsapp.com'
     };
 
     const pcGamesMap = {
@@ -176,7 +178,7 @@ async function openApp(appName, modeId = 'productividad') {
     if (!command) {
         if (lowerApp.includes('chrome') || lowerApp.includes('google chrome')) {
             command = platform === 'win32' ? 'start chrome' : 'open -a "Google Chrome"';
-        // Casos web exactos
+            // Casos web exactos
         } else {
             for (const [siteName, url] of Object.entries(websiteMap)) {
                 if (lowerApp.includes(siteName) && lowerApp.length < siteName.length + 5) {
@@ -195,7 +197,7 @@ async function openApp(appName, modeId = 'productividad') {
 
         for (const [key, appPath] of Object.entries(discovered)) {
             const cleanKey = key.replace(/['".,?!\-]/g, '').replace(/\s+/g, '').trim();
-            
+
             // Fuzzy match: si el usuario dice "repo" y el juego es "R.E.P.O." (repo)
             if (cleanKey.includes(cleanUserQuery) || cleanUserQuery.includes(cleanKey) || cleanKey === cleanUserQuery) {
                 if (appPath.startsWith("http")) {
@@ -246,7 +248,7 @@ function handleSystemCommand(text) {
         trigger = trigger.replace(/^jarvis /i, '');
         return { isTraining: true, trigger: trigger, appName: app };
     }
-    
+
     // 3. Extracción estándar de comandos del sistema
     const match = lowerText.match(/(?:abre|abrir|ir a|ve a|busca|buscar|búscame|búsqueda|preguntale a|pon|ponme|reproduce) (.+)/i);
 
@@ -255,7 +257,7 @@ function handleSystemCommand(text) {
         if (appToOpen.endsWith('.')) {
             appToOpen = appToOpen.slice(0, -1);
         }
-        
+
         // 2. Detectar si la orden concreta es un COMANDO YA ENTRENADO por la red neuronal
         // Se hace después del Regex general para capturar exactamente "lo que se quiere buscar" en lugar de hacer match al azar en medio de la frase
         if (fs.existsSync(customCommandsFile)) {
