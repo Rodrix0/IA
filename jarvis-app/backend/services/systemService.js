@@ -2,6 +2,7 @@ const { exec } = require('child_process');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const appDiscoveryService = require('./appDiscoveryService');
 
 // --- 0. Sistema de Comandos de Entrenamiento ---
 const customCommandsFile = path.join(__dirname, '..', 'data', 'comandos.json');
@@ -182,6 +183,28 @@ async function openApp(appName, modeId = 'productividad') {
                     command = platform === 'win32' ? `start ${url}` : `open ${url}`;
                     break;
                 }
+            }
+        }
+    }
+
+    // B.5 Búsqueda de Disco Duro (Mapeo Inteligente)
+    if (!command) {
+        const discovered = appDiscoveryService.getAppDictionary();
+        // Intentar limpiar símbolos extraños (ej: R.E.P.O. -> repo)
+        const cleanUserQuery = lowerApp.replace(/['".,?!\-]/g, '').replace(/\s+/g, '').trim();
+
+        for (const [key, appPath] of Object.entries(discovered)) {
+            const cleanKey = key.replace(/['".,?!\-]/g, '').replace(/\s+/g, '').trim();
+            
+            // Fuzzy match: si el usuario dice "repo" y el juego es "R.E.P.O." (repo)
+            if (cleanKey.includes(cleanUserQuery) || cleanUserQuery.includes(cleanKey) || cleanKey === cleanUserQuery) {
+                if (appPath.startsWith("http")) {
+                    command = platform === 'win32' ? `start "" "${appPath}"` : `open "${appPath}"`;
+                } else {
+                    command = platform === 'win32' ? `start "" "${appPath}"` : `open "${appPath}"`;
+                }
+                console.log(`\n[Jarvis HDD] 🎯 Encontré un programa en tu disco duro que coincide: ${key}\nLanzando: ${appPath}`);
+                break;
             }
         }
     }
