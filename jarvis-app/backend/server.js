@@ -61,12 +61,15 @@ io.on('connection', (socket) => {
 
         try {
             // 0. Toggle de Observador/Estudio Activo
-            if (lowerText.includes('activar observador') || lowerText.includes('activa modo estudio activo') || lowerText.includes('activa observación') || lowerText.includes('activa observacion') || lowerText.includes('inicia modo estudio activo') || lowerText.includes('activa el observador')) {
+            const turnOnWords = ['activar observador', 'activa observador', 'activa el observador', 'modo observador', 'modo observación', 'modo observacion', 'estudio activo', 'inicia observador', 'enciende el observador'];
+            const turnOffWords = ['desactivar observador', 'desactiva observador', 'apaga observador', 'apaga el observador', 'apaga observacion', 'apaga observación', 'desactiva estudio activo'];
+
+            if (turnOnWords.some(w => lowerText.includes(w))) {
                 observerService.toggleObserver(true);
                 responseText = "Modo Estudio Activo habilitado. He activado mi red de escaneo neuromotriz; a partir de ahora analizaré tus ventanas para brindarte ayuda contextual.";
                 action = "OBSERVER_ON";
             } 
-            else if (lowerText.includes('desactivar observador') || lowerText.includes('apaga observacion') || lowerText.includes('apaga observación') || lowerText.includes('desactiva modo estudio activo') || lowerText.includes('apaga el observador')) {
+            else if (turnOffWords.some(w => lowerText.includes(w))) {
                 observerService.toggleObserver(false);
                 responseText = "Modo Estudio Activo deshabilitado. Mis ojos locales sobre el sistema operativo han sido apagados.";
                 action = "OBSERVER_OFF";
