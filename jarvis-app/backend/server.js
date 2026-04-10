@@ -10,6 +10,7 @@ const systemService = require('./services/systemService');
 const aiService = require('./services/aiService');
 const backgroundTuner = require('./services/backgroundTuner');
 const observerService = require('./services/observerService');
+const appDiscoveryService = require('./services/appDiscoveryService');
 
 const app = express();
 const server = http.createServer(app);
@@ -158,4 +159,6 @@ server.listen(PORT, () => {
     
     // Iniciar el estudio automático en segundo plano
     backgroundTuner.startBackgroundStudying();
+    // Iniciar el indexador de accesos directos
+    appDiscoveryService.triggerBackgroundScan();
 });

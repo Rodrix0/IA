@@ -1,4 +1,9 @@
+# Bases de Datos y Memoria Privada de Jarvis
+data/
+*.json
+!package.json
+!package-lock.json
 
-data/historial_observador.json
-data/memoria.json
-data/comandos.json
+# Ignorar node_modules y entornos si en algún momento los agregas
+node_modules/
+.env
