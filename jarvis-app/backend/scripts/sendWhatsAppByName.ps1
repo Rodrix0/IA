@@ -57,23 +57,8 @@ Start-Sleep -Milliseconds 400
 [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
 Start-Sleep -Milliseconds 1000
 
-# TRUCO DE SEGURIDAD MÁXIMA: Si no encontró a nadie, el foco estará en la barra de búsqueda y 
-# escribirá "Hola" pegado al nombre (GabiHola). Para evitarlo, enviamos un ESC
-# en caso de que esté trancado, y volvemos a dar ENTER (en el chat esto no borra nada)
-# Sin embargo, lo mejor para salir del cuadro de búsqueda es forzar un TAP (Tab) que entra al chat
-# si se encontró.
-[System.Windows.Forms.SendKeys]::SendWait("{TAB}")
-Start-Sleep -Milliseconds 200
-
 # Escribir el mensaje
-foreach ($char in $MessageText.ToCharArray()) {
-    # SendWait se rompe con caracteres especiales de regex, así que usamos envio básico
-    if ($char -match '[+^%~(){}]') {
-        [System.Windows.Forms.SendKeys]::SendWait("{$char}")
-    } else {
-        [System.Windows.Forms.SendKeys]::SendWait($char)
-    }
-}
+[System.Windows.Forms.SendKeys]::SendWait($MessageText)
 Start-Sleep -Milliseconds 800
 
 # Enviar el mensaje con Enter

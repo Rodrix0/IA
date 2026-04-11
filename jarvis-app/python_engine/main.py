@@ -13,7 +13,7 @@ class ActionRequest(BaseModel):
     parameters: dict = {}
 
 @app.post("/execute")
-async def execute_action(req: ActionRequest):
+def execute_action(req: ActionRequest):
     print(f"Ejecutando acción: {req.action} - Objetivo: {req.target}")
     
     if req.action == "send_whatsapp":
