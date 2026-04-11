@@ -115,9 +115,22 @@ async function procesarMemoriaDinamica(busqueda, modeId) {
 async function openApp(appName, modeId = 'productividad') {
     const platform = os.platform();
     let command = '';
-    const lowerApp = appName.toLowerCase().trim();
+    // Limpieza mega estricta para quitar variaciones que el cerebro haya dejado pasar
+    let lowerApp = appName.toLowerCase().trim();
+    lowerApp = lowerApp.replace(/^(abrir|abre|abrí|abr[ií]me|iniciar|inici[aá]|arrancar|arranc[aá]|lanza|ejecutar|ejecut[aá]|entrar a|entr[aá] a|entrar|entr[aá]|met[eé]te en|ir a|ve a|buscar|busca|buscar en|pon|pon[eé]|reproduce|abrirme el|abrime el|el|la|los|las|un|una)\s+/gi, '').trim();
 
-    const websiteMap = {
+    // 1. Cargar links personalizados (ignorado en Git por estar en /data/)
+    const customLinksFile = path.join(__dirname, '..', 'data', 'custom_links.json');
+    let customLinks = {};
+    if (fs.existsSync(customLinksFile)) {
+        try {
+            customLinks = JSON.parse(fs.readFileSync(customLinksFile, 'utf8'));
+        } catch (e) {
+            console.error("Error leyendo custom_links.json:", e);
+        }
+    }
+
+    const defaultWebsiteMap = {
         'youtube': 'https://www.youtube.com',
         'google': 'https://www.google.com',
         'netflix': 'https://www.netflix.com',
@@ -137,14 +150,11 @@ async function openApp(appName, modeId = 'productividad') {
         'instagram': 'https://www.instagram.com',
         'twitter': 'https://twitter.com',
         'twitch': 'https://www.twitch.tv',
-        'github': 'https://github.com',
-        'campus ucp': 'https://campus.ucp.edu.ar',
-        'campus': 'https://campus.ucp.edu.ar',
-        'sistema ucp': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx',
-        'sistema cuenca': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx',
-        'mis notas': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx',
-        'notas ucp': 'https://sistemacuenca.ucp.edu.ar/Alumnosnotas/Proteccion/Inicio.aspx'
+        'github': 'https://github.com'
     };
+
+    // Combinar los links por defecto con los personalizados del usuario
+    const websiteMap = { ...defaultWebsiteMap, ...customLinks };
 
     const pcGamesMap = {
         'steam': 'start steam://',
@@ -190,8 +200,9 @@ async function openApp(appName, modeId = 'productividad') {
             // Casos web exactos
         } else {
             for (const [siteName, url] of Object.entries(websiteMap)) {
-                if (lowerApp.includes(siteName) && lowerApp.length < siteName.length + 5) {
-                    command = platform === 'win32' ? `start ${url}` : `open ${url}`;
+                // Hacemos el match más flexible
+                if (lowerApp.includes(siteName)) {
+                    command = platform === 'win32' ? `start "" "${url}"` : `open "${url}"`;
                     break;
                 }
             }

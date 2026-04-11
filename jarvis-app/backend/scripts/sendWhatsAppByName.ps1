@@ -14,12 +14,14 @@ $wshell = New-Object -ComObject wscript.shell
 $success = $wshell.AppActivate("WhatsApp")
 
 if (-not $success) {
-    Write-Output "No se encontró la ventana de WhatsApp, asumiendo navegador o app de escritorio..."
-    # A veces Chrome dice "WhatsApp - Google Chrome"
+    Write-Output "No se encontró la ventana de WhatsApp, buscando en Chrome..."
     $successChrome = $wshell.AppActivate("WhatsApp - Google Chrome")
+    
     if (-not $successChrome) {
-         # Ultimo intento vago a algo que contenga WhatsApp
-         $wshell.AppActivate("WhatsApp")
+        Write-Output "WhatsApp no está abierto. Abriendo WhatsApp Web automáticamente..."
+        Start-Process "https://web.whatsapp.com"
+        # Le damos 12 segundos para que el navegador se abra, cargue la página y se inicie la sesión
+        Start-Sleep -Seconds 12
     }
 }
 
