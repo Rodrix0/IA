@@ -42,7 +42,8 @@ async function fetchOllamaResponse(prompt) {
         body: JSON.stringify({
             model: 'llama3', 
             prompt: prompt,
-            stream: false
+            stream: false,
+            format: 'json' // Obligamos a Ollama a responder en formato JSON!
         })
     });
 
@@ -51,77 +52,111 @@ async function fetchOllamaResponse(prompt) {
     }
 
     const data = await response.json();
-    return data.response;
+    try {
+        return JSON.parse(data.response); // Parseamos el JSON que nos dio Ollama
+    } catch (e) {
+        console.error("Error parseando respuesta JSON de Ollama:", data.response);
+        return { action: "chat", reply: "Hubo un error interpretando mi cerebro neuronal." };
+    }
 }
 
 async function getAIResponse(userText, activeMode, screenContext = null) {
     try {
-        // En Ollama, enviamos las instrucciones directamente al motor local
-        let fullPrompt = "INSTRUCCIONES DE COMPORTAMIENTO (Debes actuar siempre así):\n" + activeMode.prompt + "\n";
-        fullPrompt += "=== REGLA DE SUPERVIVENCIA ABSOLUTA ===\nSi te preguntan CUALQUIER DATO DEL MUNDO EXTERIOR (clima, cuándo juegan equipos de fútbol, noticias, o definiciones de cosas que no sabes explicar), ESTÁ PROHIBIDO improvisar o usar etiquetas raras (como [FUTBOL] o [JARVIS_OS]). Tu única respuesta debe comenzar obligatoriamente con la frase exacta 'BUSCAR_EN_INTERNET: ' seguida de lo que hay que buscar en Google. \nEjemplo correcto: BUSCAR_EN_INTERNET: cuando juega boca juniors\nEjemplo correcto: BUSCAR_EN_INTERNET: que es la simulacion\n¡No escribas nada más!\n=====================================\n\n";
+        let fullPrompt = "INSTRUCCIONES DEL SISTEMA BASE:\n" + activeMode.prompt + "\n";
+        fullPrompt += "Estás actuando como el cerebro de un Asistente Virtual Híbrido.\n";
+        fullPrompt += "=== REGLA DE SUPERVIVENCIA ABSOLUTA ===\n";
+        fullPrompt += "Tu ÚNICA salida debe ser un objeto JSON válido con la siguiente estructura y NADA MÁS:\n";
+        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, chat\",\n";
+        fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'Juan', 'Chrome', 'el clima')\",\n";
+        fullPrompt += "  \"message\": \"El mensaje o contenido de la acción (si aplica)\",\n";
+        fullPrompt += "  \"reply\": \"Lo que le vas a decir al usuario por voz (siempre en español, amigable y corto)\" \n}\n\n";
+        fullPrompt += "Si la petición requiere ejecutar una acción en Python o el Sistema, coloca 'reply' confirmándolo (ej: 'Abriendo Spotify...', 'Enviando mensaje...') y usa la 'action' correcta.\n";
+        fullPrompt += "Si es solo charla, pon 'action': 'chat' y tu respuesta en 'reply'.\n";
+        fullPrompt += "Si es abrir app o web, usa 'open_app' y pon el nombre en 'target'.\n";
+        fullPrompt += "Si es mandar WhatsApp o correo, usa 'send_whatsapp' o 'send_email', pon exactamente EL NOMBRE DEL CONTACTO (el que escuchas, con sus nombres, apellidos o emojis fonéticos) en 'target' y EL TEXTO A ENVIAR en 'message'.\n";
+        fullPrompt += "Para WhatsApp, es VITAL que resuelvas el target tal cual lo dice el usuario. Ejemplo: si dice 'enviale a los pibes nashe', tu target DEBE ser 'los pibes nashe'.\n";
+        fullPrompt += "REGLA DE ORTOGRAFÍA EN NOMBRES: Si el usuario te aclara cómo se escribe el nombre (ej: 'gabi con i latina', 'gaby con i griega', 'con s', 'con z'), APLICA esa conversión ortográfica tú mismo en el 'target' (ej: 'gaby' o 'gabi') pero NUNCA incluyas la frase de aclaración adentro del target final.\n";
+        fullPrompt += "Importante: NUNCA dejes 'reply' vacío, SIEMPRE comunícate confirmando o respondiendo al usuario en esa propiedad.\n";
+        fullPrompt += "¡NO ESCRIBAS TEXTO FUERA DEL JSON!\n=====================================\n\n";
         
-        // Si el observador de pantalla detectó en qué andas metido:
         if (screenContext) {
-            fullPrompt += screenContext + "\n\n";
+            fullPrompt += "CONTEXTO VISUAL ACTUAL: " + screenContext + "\n\n";
         }
 
         if (conversationHistory.length > 0) {
             fullPrompt += "HISTORIAL DE CONVERSACIÓN RECIENTE:\n";
             conversationHistory.forEach(msg => {
-                fullPrompt += (msg.role === 'user' ? "Usuario" : "Jarvis") + ": " + msg.content + "\n";
+                fullPrompt += (msg.role === 'user' ? "Usuario" : "Jarvis") + ": " + (msg.content.reply || msg.content) + "\n";
             });
             fullPrompt += "\n";
         }
 
-        fullPrompt += "Usuario: " + userText + "\nJarvis:";
+        fullPrompt += "Usuario: " + userText + "\n";
 
-        // 1. Primer intento: Preguntarle a la Inteligencia Artificial si lo sabe
-        let reply = await fetchOllamaResponse(fullPrompt);
+        // Obtenemos la decisión directa como objeto JSON
+        let intent = await fetchOllamaResponse(fullPrompt);
 
-        // 2. ¿El LLM decidió que necesita buscar en internet o está alucinando una etiqueta?
-        if (reply.includes("BUSCAR_EN_INTERNET:") || (reply.startsWith("[") && reply.endsWith("]"))) {
-            let searchQuery = "";
+        // Si pide búsqueda y el motor principal prefiere que lo procesemos:
+        if (intent.action === "search_web") {
+            const searchResults = await performInvisibleSearch(intent.target || userText);
+
+            const secondPrompt = `El usuario preguntó: "${userText}".\nResultados de web:\n${searchResults}\n\nDevuelve de nuevo un JSON, pon 'action': 'chat' y usa la información para llenar 'reply'.`;
             
-            if (reply.includes("BUSCAR_EN_INTERNET:")) {
-                searchQuery = reply.split("BUSCAR_EN_INTERNET:")[1].trim();
-            } else {
-                // Si la IA desobedece y sigue alucinando corchetes (ej: [JUEGOS_DE_FUTBOL]), le extraemos el texto y buscamos eso
-                const match = reply.match(/\[(.*?)\]/);
-                if (match && match[1]) {
-                    // Limpiamos los "TAGS:" que inventa a veces
-                    searchQuery = match[1].replace(/^.*?:\s*/, '').trim();
-                    // Si el corchete no dice nada coherente, usamos la pregunta original como búsqueda
-                    if (searchQuery.length < 3 || searchQuery.includes("_")) {
-                        searchQuery = userText;
-                    }
-                }
+            console.log(`[Agente Araña] 🧠 Procesando información y emitiendo JSON final...`);
+            intent = await fetchOllamaResponse(secondPrompt);
+        }
+
+        // Ejecutar Actions de Python o Node.js:
+        if (intent.action && intent.action !== "chat" && intent.action !== "none" && intent.action !== "search_web") {
+            
+            // Limpieza de seguridad post-IA para nombres de WhatsApp
+            if (intent.action === "send_whatsapp" && intent.target) {
+                // Removemos las aclaraciones fonéticas sucias por si la IA falló en borrarlas
+                intent.target = intent.target.replace(/\s+con\s+(i\s*latina|i\s*griega|y|s|z|c|b|v\s*corta|v|h)\s*/gi, '').trim();
+                // Transformar "gabi con i latina" a solo "gabi"
             }
-            
-            if (searchQuery) {
-                // Ejecutamos el Scraper de manera invisible
-                const searchResults = await performInvisibleSearch(searchQuery);
 
-                // Volvemos a inyectar la info y le decimos a la IA que nos responda leyendo esto
-                const secondPrompt = `Te preguntaron: "${userText}".\nHice una búsqueda en Google y encontré los siguientes datos:\n\n${searchResults}\n\nREGLA: Responde directo, amigable y muy corto a lo que el usuario preguntó utilizando ÚNICAMENTE la información anterior. Si la información no responde perfectamente, deduce la mejor respuesta posible en base a lo encontrado. No repitas la palabra WEB_SEARCH.`;
-                
-                console.log(`[Agente Araña] 🧠 Leyendo hallazgos de internet y formulando respuesta...`);
-                reply = await fetchOllamaResponse(secondPrompt);
+            if (intent.action === "open_app") {
+                console.log(`[Jarvis Local] Abriendo aplicación: ${intent.target}`);
+                const sysServices = require('./systemService');
+                await sysServices.openApp(intent.target, activeMode.id);
+            } else {
+                // Intentar enviar al motor Python FastAPI para tareas pesadas
+                try {
+                    const pyResponse = await fetch('http://127.0.0.1:8000/execute', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: intent.action,
+                            target: intent.target,
+                            message: intent.message || ""
+                        })
+                    });
+                    
+                    if(!pyResponse.ok) {
+                        console.log(`[Motor Python] Servidor devolvió error HTTP ${pyResponse.status}`);
+                    } else {
+                        const pyData = await pyResponse.json();
+                        console.log(`[Acción Híbrida Ejecutada]: ${pyData.message}`);
+                    }
+                } catch (e) {
+                     console.log("[Aviso]: Motor Python (http://127.0.0.1:8000/execute) inalcanzable. Comprueba Uvicorn.");
+                }
             }
         }
 
         // Actualizar nuestro historial interno
         conversationHistory.push({ role: "user", content: userText });
-        conversationHistory.push({ role: "assistant", content: reply });
+        conversationHistory.push({ role: "assistant", content: intent });
 
-        // Mantenemos solo los últimos 10 mensajes
         if (conversationHistory.length > 10) {
             conversationHistory = conversationHistory.slice(-10);
         }
 
-        return reply;
+        return intent.reply || "He procesado la acción pero no generé respuesta hablada.";
     } catch (error) {
         console.error("Error Local de IA o de Conexión de Scraper:", error.message);
-        return "Mis sistemas cognitivos están apagados. Por favor, asegúrate de que Ollama esté ejecutándose en tu computadora.";
+        return "Mis sistemas cognitivos están apagados. Por favor, asegúrate de que Ollama esté ejecutándose.";
     }
 }
 
