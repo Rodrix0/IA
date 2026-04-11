@@ -9,20 +9,19 @@ param(
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName Microsoft.VisualBasic
 
-# Intentamos traer la ventana de WhatsApp al frente.
 $wshell = New-Object -ComObject wscript.shell
-$success = $wshell.AppActivate("WhatsApp")
 
-if (-not $success) {
-    Write-Output "No se encontró la ventana de WhatsApp, buscando en Chrome..."
-    $successChrome = $wshell.AppActivate("WhatsApp - Google Chrome")
-    
-    if (-not $successChrome) {
-        Write-Output "WhatsApp no está abierto. Abriendo WhatsApp Web automáticamente..."
-        Start-Process "https://web.whatsapp.com"
-        # Le damos 12 segundos para que el navegador se abra, cargue la página y se inicie la sesión
-        Start-Sleep -Seconds 12
-    }
+# Buscamos de manera inteligente CUALQUIER ventana que tenga "WhatsApp" en su título (Chrome, Edge, App Nativa)
+$waProcess = Get-Process | Where-Object { $_.MainWindowTitle -match "WhatsApp" } | Select-Object -First 1
+
+if ($waProcess) {
+    Write-Output "WhatsApp encontrado abierto: $($waProcess.MainWindowTitle). Traiéndolo al frente..."
+    $wshell.AppActivate($waProcess.Id) | Out-Null
+} else {
+    Write-Output "WhatsApp no está abierto. Abriendo WhatsApp Web automáticamente..."
+    Start-Process "https://web.whatsapp.com"
+    # Le damos 12 segundos para que el navegador se abra, cargue la página y se inicie la sesión
+    Start-Sleep -Seconds 12
 }
 
 # Dar tiempo a que la ventana obtenga el foco

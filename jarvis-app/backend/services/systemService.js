@@ -75,8 +75,8 @@ async function procesarMemoriaDinamica(busqueda, modeId) {
 
         // Enrutador inteligente avanzado (con consciencia de MODO):
         // 1. Si pide ChatGPT o Gemini EXPLÍCITAMENTE
-        if (busqueda.includes('chat gpt') || busqueda.includes('chatgpt') || busqueda.includes('en chat') || busqueda.includes('con chat')) {
-            let promptBase = busqueda.replace(/chat gpt|chatgpt|en chat|con chat|busca en|busca|y me busque sobre|y busca sobre/gi, '').trim();
+        if (busqueda.includes('chat gpt') || busqueda.includes('chatgpt') || busqueda.includes('en chat') || busqueda.includes('con chat') || busqueda.includes('chat')) {
+            let promptBase = busqueda.replace(/chat|chat gpt|chatgpt|en chat|con chat|busca en|buscar|busca|y me busque sobre|y busca sobre|y busca|la palabra|información|informacion/gi, '').trim();
             if (promptBase.length > 2) {
                 nuevoLink = `https://chat.openai.com/?q=${encodeURIComponent(promptBase)}`;
             } else {
@@ -98,9 +98,12 @@ async function procesarMemoriaDinamica(busqueda, modeId) {
                 nuevoLink = `https://www.google.com/search?q=${encodeURIComponent(queryLimpio)}`;
             }
         }
-        // 3. Default: Youtube (Ideal para modo productividad o juego)
+        // 3. Default: Youtube, limpiando la palabra clave previamente (Ideal para modo productividad o juego)
         else {
-            nuevoLink = await buscarEnYoutube(busqueda);
+            let queryYoutube = busqueda
+                .replace(/youtube|en youtube|buscar|busca|pon|el canal de|el video de/gi, '')
+                .trim();
+            nuevoLink = await buscarEnYoutube(queryYoutube);
         }
 
         // Lo guardamos en el JSON para no tener que buscarlo nunca más
@@ -200,8 +203,8 @@ async function openApp(appName, modeId = 'productividad') {
             // Casos web exactos
         } else {
             for (const [siteName, url] of Object.entries(websiteMap)) {
-                // Hacemos el match más flexible
-                if (lowerApp.includes(siteName)) {
+                // Si la orden contiene la palabra, PERO el usuario no está pidiendo buscar un video o info extra (es corta)
+                if (lowerApp.includes(siteName) && lowerApp.length <= siteName.length + 5) {
                     command = platform === 'win32' ? `start "" "${url}"` : `open "${url}"`;
                     break;
                 }
