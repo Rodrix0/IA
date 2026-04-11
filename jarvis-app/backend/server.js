@@ -103,7 +103,7 @@ io.on('connection', (socket) => {
                 }
             }
             else {
-                // 2. Comandos de sistema (Abrir apps y Entrenamientos)
+                // 2. Comandos de sistema (Abrir apps y Entrenamientos) - Conservamos la Vía Rápida primero
                 const sysCommand = systemService.handleSystemCommand(text);
                 
                 if (sysCommand.isTraining) {
@@ -111,10 +111,9 @@ io.on('connection', (socket) => {
                     responseText = `Entendido. A partir de ahora, cuando me digas "${sysCommand.trigger}", abriré ${sysCommand.appName}.`;
                     action = "TRAINING_SAVED";
                 }
-                else if (sysCommand.isSystemCommand) {
-                    responseText = sysCommand.isLearned
-                        ? `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`
-                        : `Iniciando proceso: Abriendo ${sysCommand.appName}, señor.`;
+                else if (sysCommand.isSystemCommand && sysCommand.isLearned) {
+                    // Solo interceptamos en la capa rápida si es un comando EXPLÍCITAMENTE aprendido o muy simple
+                    responseText = `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`;
                         
                     const activeMode = modeService.getActiveMode();
                     const success = await systemService.openApp(sysCommand.appName, activeMode.id);
@@ -122,7 +121,7 @@ io.on('connection', (socket) => {
                         responseText = `Hubo un inconveniente al intentar abrir la aplicación ${sysCommand.appName}.`;
                     }
                 }
-                // 3. Respuesta de IA (Cerebro)
+                // 3. Respuesta de IA (Cerebro Híbrido) - Delega todo lo demás a Ollama
                 else {
                     const activeMode = modeService.getActiveMode();
                     const screenContext = observerService.getScreenContext();
