@@ -86,12 +86,16 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         if (conversationHistory.length > 0) {
             fullPrompt += "HISTORIAL DE CONVERSACIÓN RECIENTE:\n";
             conversationHistory.forEach(msg => {
-                fullPrompt += (msg.role === 'user' ? "Usuario" : "Jarvis") + ": " + (msg.content.reply || msg.content) + "\n";
+                // Al historial le damos formato de texto normal, NO en JSON, para que no se confunda
+                let contentText = msg.content.reply || msg.content;
+                fullPrompt += (msg.role === 'user' ? "Usuario: " : "Jarvis: ") + contentText + "\n";
             });
             fullPrompt += "\n";
         }
 
-        fullPrompt += "Usuario: " + userText + "\n";
+        fullPrompt += "=====================================\n";
+        fullPrompt += "Usuario (Último y más importante comando): " + userText + "\n";
+        fullPrompt += "Responde generando un JSON a partir de esta ÚLTIMA acción:\n";
 
         // Obtenemos la decisión directa como objeto JSON
         let intent = await fetchOllamaResponse(fullPrompt);
