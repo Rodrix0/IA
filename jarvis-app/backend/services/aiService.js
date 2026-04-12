@@ -66,7 +66,7 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         fullPrompt += "Estás actuando como el cerebro de un Asistente Virtual Híbrido.\n";
         fullPrompt += "=== REGLA DE SUPERVIVENCIA ABSOLUTA ===\n";
         fullPrompt += "Tu ÚNICA salida debe ser un objeto JSON válido con la siguiente estructura y NADA MÁS:\n";
-        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, chat\",\n";
+        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, clear_reminders, chat\",\n";
         fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'Juan', 'Chrome', 'el clima')\",\n";
         fullPrompt += "  \"message\": \"El mensaje o contenido de la acción (si aplica)\",\n";
         fullPrompt += "  \"time\": \"Opcional. SOLO si action es 'schedule_task', pon aquí la hora en formato HH:MM (ej: '14:00', '09:30')\",\n";
@@ -75,6 +75,7 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         fullPrompt += "Si la petición requiere ejecutar una acción en Python o el Sistema, coloca 'reply' confirmándolo (ej: 'Abriendo Spotify...', 'Enviando mensaje...') y usa la 'action' correcta.\n";
         fullPrompt += "Si el usuario TE PIDE QUE PROGRAMES UNA TAREA A UNA HORA o que mandes un mensaje LUEGO / MÁS TARDE en una hora específica (ej: 'mándale un mensaje a ma a las 14:00'), usa 'action': 'schedule_task'. Llena 'target' con la persona o cosa, 'message' con lo que hay que enviar o decir, 'action_type' con la acción real ('send_whatsapp' o 'speak' o 'open_app'), y 'time' con la hora 'HH:MM'.\n";
         fullPrompt += "Si el usuario pregunta QUÉ TIENE QUE HACER, o SUS TAREAS / RECORDATORIOS (ej: 'qué tengo para hacer hoy', 'revisá mis recordatorios', 'fijate en mi app'), usa la acción 'check_reminders'. Tu 'reply' debe confirmar que lo revisarás.\n";
+        fullPrompt += "Si el usuario TE PIDE BORRAR, LIMPIAR O ELIMINAR sus alarmas o tareas locales, usa la acción 'clear_reminders'.\n";
         fullPrompt += "Si es solo charla o conversación simple, pon 'action': 'chat' y tu respuesta en 'reply'.\n";
         fullPrompt += "Si el usuario te hace una PREGUNTA donde TÚ debes contestarle verbalmente con información (ej: 'quién ganó el partido', 'qué es un autómata', 'cuándo juega el real'), usa 'search_web' y pon el conocimiento a buscar en 'target'.\n";
         fullPrompt += "Si el usuario te pide ABRIR, BUSCAR o PONER algo dentro de una aplicación web para que ÉL lo vea (ej: 'abrir chat gpt y buscar conejos', 'abre youtube y pon la cobra', 'busca motos en google'), debes usar 'open_app'. IMPORTANTE: En el 'target', incluye el nombre de la app junto con lo que quiere buscar (ej: 'chat gpt buscar conejos', 'youtube la cobra', 'google comprar motos'). NUNCA uses 'search_web' si el usuario te está pidiendo que abras la página.\n";
@@ -130,6 +131,12 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                 } else {
                     return "No comprendí a qué hora debo realizar eso, por favor dímelo otra vez.";
                 }
+            }
+
+            if (intent.action === "clear_reminders") {
+                remServices.clearLocalReminders();
+                console.log(`[Jarvis Cronos] 🧹 Reminders locales borrados.`);
+                return "He limpiado todas las alarmas y tareas programadas locales de mi sistema.";
             }
             
             if (intent.action === "check_reminders") {
