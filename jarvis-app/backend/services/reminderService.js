@@ -195,9 +195,17 @@ function startScheduler(io) {
     }, 60000); // 60 segundos
 }
 
+// Borrar todas las tareas locales (alarmas/recordatorios)
+function clearLocalReminders() {
+    initMemory();
+    fs.writeFileSync(remindersFile, JSON.stringify([], null, 2));
+    return true;
+}
+
 module.exports = {
     addLocalReminder,
     getLocalReminders,
+    clearLocalReminders,
     fetchExternalTasks,
     startScheduler
 };
