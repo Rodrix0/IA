@@ -11,11 +11,11 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 
 $wshell = New-Object -ComObject wscript.shell
 
-# Buscamos de manera inteligente CUALQUIER ventana que tenga "WhatsApp" en su título (Chrome, Edge, App Nativa)
-$waProcess = Get-Process | Where-Object { $_.MainWindowTitle -match "WhatsApp" } | Select-Object -First 1
+# Buscamos la app nativa de WhatsApp o cualquier navegador que tenga la pestaña de WhatsApp ACTIVA
+$waProcess = Get-Process | Where-Object { $_.MainWindowTitle -match "(?i)WhatsApp" -or $_.ProcessName -match "(?i)WhatsApp" } | Sort-Object MainWindowTitle -Descending | Select-Object -First 1
 
 if ($waProcess) {
-    Write-Output "WhatsApp encontrado abierto: $($waProcess.MainWindowTitle). Traiéndolo al frente..."
+    Write-Output "WhatsApp encontrado abierto (Process: $($waProcess.ProcessName) | Title: $($waProcess.MainWindowTitle)). Traiéndolo al frente..."
     $wshell.AppActivate($waProcess.Id) | Out-Null
 } else {
     Write-Output "WhatsApp no está abierto. Abriendo WhatsApp Web automáticamente..."
