@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const cheerio = require('cheerio');
+const { exec } = require('child_process');
+const notifier = require('node-notifier');
 
 const remindersFile = path.join(__dirname, '..', 'data', 'recordatorios.json');
 
@@ -34,6 +36,18 @@ function addLocalReminder(timeStr, action, target, message) {
     });
     fs.writeFileSync(remindersFile, JSON.stringify(reminders, null, 2));
     return true;
+}
+
+// Enviar notificación a pantalla (Windows 10/11)
+function showWindowsNotification(title, message) {
+    notifier.notify({
+        title: title,
+        message: message,
+        sound: true, // Reproducir sonido de Windows
+        wait: false  // No bloquear el sistema
+    }, function (err, response) {
+        if (err) console.error("Error mostrando notificación de Windows:", err);
+    });
 }
 
 // Conectar directamente con la base de datos Supabase
@@ -133,6 +147,8 @@ function startScheduler(io) {
                 // Ejecuciones directas
                 if (task.action === "send_whatsapp" || task.action === "send_email") {
                     try {
+                        showWindowsNotification("Jarvis - Disparando Acción Externa", `Ejecutando: Enviar mensaje a ${task.target}...`);
+                        
                         const pyResponse = await fetch('http://127.0.0.1:8000/execute', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -144,6 +160,8 @@ function startScheduler(io) {
                         });
                         
                         if (pyResponse.ok) {
+                            showWindowsNotification("Jarvis - Éxito", `Se envió correctamente el mensaje a ${task.target}.`);
+                            
                             // Le avisamos al usuario por voz si queremos o simplemente lo informamos en pantalla
                             io.emit('jarvis_response', { 
                                 aiReply: "Acabo de enviar el mensaje programado a " + task.target,
@@ -151,14 +169,18 @@ function startScheduler(io) {
                             });
                         }
                     } catch (e) {
+                        showWindowsNotification("Jarvis - Error de Conexión", "El motor Python (FastAPI) estaba apagado, la tarea falló.");
                         console.log("[Aviso]: Motor Python apagado en la ejecución programada.");
                     }
                 } else if (task.action === "open_app") {
+                    showWindowsNotification("Jarvis - Abriendo Sistema", `Abriendo ${task.target} por tarea programada.`);
                     const sysServices = require('./systemService');
                     await sysServices.openApp(task.target, "productividad");
                 } else if (task.action === "speak") {
+                    showWindowsNotification("Jarvis - ¡Recordatorio!", task.message || "Es hora de la meta programada.");
+                    
                     io.emit('jarvis_response', { 
-                        aiReply: "¡Recordatorio especial! " + task.message,
+                        aiReply: "¡Atención, señor! Recordatorio especial: " + task.message,
                         mood: "success"
                     });
                 }
