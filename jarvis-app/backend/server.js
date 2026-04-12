@@ -12,6 +12,7 @@ const backgroundTuner = require('./services/backgroundTuner');
 const observerService = require('./services/observerService');
 const appDiscoveryService = require('./services/appDiscoveryService');
 const hotkeyService = require('./services/hotkeyService');
+const reminderService = require('./services/reminderService');
 
 const app = express();
 const server = http.createServer(app);
@@ -163,4 +164,6 @@ server.listen(PORT, () => {
     appDiscoveryService.triggerBackgroundScan();
     // Conectar el gancho USB/Teclado físico
     hotkeyService.initHotkeyService(io);
+    // Iniciar modulo Cronos para tareas y recordatorios
+    reminderService.startScheduler(io);
 });

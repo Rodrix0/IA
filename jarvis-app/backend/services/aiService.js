@@ -66,11 +66,15 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         fullPrompt += "Estás actuando como el cerebro de un Asistente Virtual Híbrido.\n";
         fullPrompt += "=== REGLA DE SUPERVIVENCIA ABSOLUTA ===\n";
         fullPrompt += "Tu ÚNICA salida debe ser un objeto JSON válido con la siguiente estructura y NADA MÁS:\n";
-        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, chat\",\n";
+        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, chat\",\n";
         fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'Juan', 'Chrome', 'el clima')\",\n";
         fullPrompt += "  \"message\": \"El mensaje o contenido de la acción (si aplica)\",\n";
+        fullPrompt += "  \"time\": \"Opcional. SOLO si action es 'schedule_task', pon aquí la hora en formato HH:MM (ej: '14:00', '09:30')\",\n";
+        fullPrompt += "  \"action_type\": \"Opcional. SOLO si action es 'schedule_task', describe la acción futura programada (ej: 'send_whatsapp' o 'speak')\",\n";
         fullPrompt += "  \"reply\": \"Lo que le vas a decir al usuario por voz (siempre en español, amigable y corto)\" \n}\n\n";
         fullPrompt += "Si la petición requiere ejecutar una acción en Python o el Sistema, coloca 'reply' confirmándolo (ej: 'Abriendo Spotify...', 'Enviando mensaje...') y usa la 'action' correcta.\n";
+        fullPrompt += "Si el usuario TE PIDE QUE PROGRAMES UNA TAREA A UNA HORA o que mandes un mensaje LUEGO / MÁS TARDE en una hora específica (ej: 'mándale un mensaje a ma a las 14:00'), usa 'action': 'schedule_task'. Llena 'target' con la persona o cosa, 'message' con lo que hay que enviar o decir, 'action_type' con la acción real ('send_whatsapp' o 'speak' o 'open_app'), y 'time' con la hora 'HH:MM'.\n";
+        fullPrompt += "Si el usuario pregunta QUÉ TIENE QUE HACER, o SUS TAREAS / RECORDATORIOS (ej: 'qué tengo para hacer hoy', 'revisá mis recordatorios', 'fijate en mi app'), usa la acción 'check_reminders'. Tu 'reply' debe confirmar que lo revisarás.\n";
         fullPrompt += "Si es solo charla o conversación simple, pon 'action': 'chat' y tu respuesta en 'reply'.\n";
         fullPrompt += "Si el usuario te hace una PREGUNTA donde TÚ debes contestarle verbalmente con información (ej: 'quién ganó el partido', 'qué es un autómata', 'cuándo juega el real'), usa 'search_web' y pon el conocimiento a buscar en 'target'.\n";
         fullPrompt += "Si el usuario te pide ABRIR, BUSCAR o PONER algo dentro de una aplicación web para que ÉL lo vea (ej: 'abrir chat gpt y buscar conejos', 'abre youtube y pon la cobra', 'busca motos en google'), debes usar 'open_app'. IMPORTANTE: En el 'target', incluye el nombre de la app junto con lo que quiere buscar (ej: 'chat gpt buscar conejos', 'youtube la cobra', 'google comprar motos'). NUNCA uses 'search_web' si el usuario te está pidiendo que abras la página.\n";
@@ -114,7 +118,45 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
 
         // Ejecutar Actions de Python o Node.js:
         if (intent.action && intent.action !== "chat" && intent.action !== "none" && intent.action !== "search_web") {
+            const sysServices = require('./systemService');
+            const remServices = require('./reminderService');
             
+            // Tareas Programadas y Recordatorios:
+            if (intent.action === "schedule_task") {
+                if (intent.time && intent.action_type) {
+                    remServices.addLocalReminder(intent.time, intent.action_type, intent.target || "", intent.message || "");
+                    console.log(`[Jarvis Cronos] ⏰ Nueva Tarea Programada: ${intent.action_type} a las ${intent.time}`);
+                    return `Entendido señor, programé la tarea para las ${intent.time}.`;
+                } else {
+                    return "No comprendí a qué hora debo realizar eso, por favor dímelo otra vez.";
+                }
+            }
+            
+            if (intent.action === "check_reminders") {
+                console.log(`[Jarvis Inteligencia] Consultando base de datos Local y Extrayendo datos de Supabase...`);
+                const locales = remServices.getLocalReminders();
+                const textoNube = await remServices.fetchExternalTasks(); // <-- Llama a Supabase
+                
+                let memoryStr = locales.length > 0 
+                  ? `Tareas Locales Programadas Activas: ${locales.map(r => `${r.action} a ${r.target} a las ${r.time}`).join(', ')}.` 
+                  : "No hay alarmas locales programadas.";
+                
+                const secondPrompt = `El usuario te pregunta qué cosas tiene para hacer.
+                \nSTATUS LOCAL:
+                \n${memoryStr}
+                \nTAREAS OBTENIDAS DESDE SU BASE DE DATOS EXTERNA (SUPABASE): 
+                \n${textoNube}
+                \n\nDevuelve un JSON con 'action': 'chat'. En el 'reply', actúa como un asistente elegante y resúmele TODO lo que tiene por hacer, juntando la data local y la externa si aplica. Si dice que faltan credenciales, explícale de forma amigable que debe configurarme el .env con los datos de Supabase.`;
+                
+                console.log(`[Agente Recordatorios] 🧠 Evaluando datos combinados y emitiendo JSON final...`);
+                intent = await fetchOllamaResponse(secondPrompt);
+                
+                // Actualizamos el historial interno con la deducción final para no romper la cadena
+                conversationHistory.push({ role: "user", content: userText });
+                conversationHistory.push({ role: "assistant", content: intent });
+                return intent.reply;
+            }
+
             // Limpieza de seguridad post-IA para nombres de WhatsApp
             if (intent.action === "send_whatsapp" && intent.target) {
                 // Removemos las aclaraciones fonéticas sucias por si la IA falló en borrarlas
