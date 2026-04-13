@@ -49,8 +49,18 @@ if (SpeechRecognition) {
         jarvisBox.textContent = "Analizando memoria y directivas...";
         setRingState('idle');
         
-        // Envía al backend todo lo que escuchó
-        socket.emit('process_speech', { text: transcript });
+        const urlContext = document.getElementById('context-url').value.trim();
+        const fileContext = document.getElementById('context-file-path').value.trim();
+        let queryToSend = transcript;
+        
+        if (urlContext) queryToSend += " " + urlContext;
+        if (fileContext) queryToSend += " " + fileContext;
+        
+        socket.emit('process_speech', { text: queryToSend });
+        
+        document.getElementById('context-url').value = "";
+        document.getElementById('context-file-path').value = "";
+        document.getElementById('dropzone-text').textContent = "Arrastra un archivo aquí (.pdf) o haz clic";
     };
 
     recognition.onend = () => {
@@ -269,5 +279,95 @@ modeForm.addEventListener('submit', async (e) => {
     }
 });
 
-// ...
+// LOGICA OBTENCIÓN Y ENVIO POR TEXTO (Para no usar voz siempre)
+document.getElementById('btn-send-text').addEventListener('click', () => {
+    const textInput = document.getElementById('manual-text-input');
+    const urlContext = document.getElementById('context-url').value.trim();
+    const fileContext = document.getElementById('context-file-path').value.trim();
+    
+    let queryToSend = textInput.value.trim();
+    if (!queryToSend) return; // no enviar vacios
+
+    userBox.textContent = `"${queryToSend}"`;
+    jarvisBox.textContent = "Analizando memoria y directivas...";
+    setRingState('idle');
+    
+    if (urlContext) queryToSend += " " + urlContext;
+    if (fileContext) queryToSend += " " + fileContext;
+    
+    socket.emit('process_speech', { text: queryToSend });
+    
+    textInput.value = "";
+    document.getElementById('context-url').value = "";
+    document.getElementById('context-file-path').value = "";
+    document.getElementById('dropzone-text').textContent = "Arrastra un archivo aquí (.pdf) o haz clic";
+});
+
+document.getElementById('manual-text-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        document.getElementById('btn-send-text').click();
+    }
+});
+
+// LOGICA DRAG AND DROP FILE UPLOAD
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('context-file');
+const filePathInput = document.getElementById('context-file-path');
+const dropzoneText = document.getElementById('dropzone-text');
+
+dropzone.addEventListener('click', () => fileInput.click());
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    dropzone.addEventListener(eventName, preventDefaults, false);
+});
+function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+
+['dragenter', 'dragover'].forEach(eventName => {
+    dropzone.addEventListener(eventName, () => dropzone.classList.add('dragover'), false);
+});
+
+['dragleave', 'drop'].forEach(eventName => {
+    dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragover'), false);
+});
+
+dropzone.addEventListener('drop', handleDrop, false);
+fileInput.addEventListener('change', function(e) { handleFiles(this.files); });
+
+function handleDrop(e) {
+    let dt = e.dataTransfer;
+    let files = dt.files;
+    handleFiles(files);
+}
+
+function handleFiles(files) {
+    if (files.length === 0) return;
+    uploadFile(files[0]);
+}
+
+function uploadFile(file) {
+    dropzoneText.textContent = "Subiendo archivo...";
+    let url = '/api/upload';
+    let formData = new FormData();
+    formData.append('file', file);
+
+    fetch(url, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.filepath) {
+            filePathInput.value = data.filepath;
+            dropzoneText.textContent = `✅ Archivo subido: ${file.name}`;
+            console.log("Archivo guardado en:", data.filepath);
+        } else {
+            dropzoneText.textContent = "❌ Error subiendo archivo";
+        }
+    })
+    .catch(() => {
+        dropzoneText.textContent = "❌ Fallo en la red al subir";
+    });
+}
+
+
 

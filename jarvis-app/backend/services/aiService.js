@@ -66,12 +66,13 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         fullPrompt += "Estás actuando como el cerebro de un Asistente Virtual Híbrido.\n";
         fullPrompt += "=== REGLA DE SUPERVIVENCIA ABSOLUTA ===\n";
         fullPrompt += "Tu ÚNICA salida debe ser un objeto JSON válido con la siguiente estructura y NADA MÁS:\n";
-        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, clear_reminders, generate_prompt, chat\",\n";
-        fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'Juan', 'Chrome', 'el clima', 'página web de turnos')\",\n";
+        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, clear_reminders, generate_prompt, create_document, chat\",\n";
+        fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'informe sobre la ingeniería de sistemas')\",\n";
         fullPrompt += "  \"message\": \"El mensaje o contenido de la acción (si aplica)\",\n";
-        fullPrompt += "  \"time\": \"Opcional. SOLO si action es 'schedule_task', pon aquí la hora en formato HH:MM (ej: '14:00', '09:30')\",\n";
-        fullPrompt += "  \"action_type\": \"Opcional. SOLO si action es 'schedule_task', describe la acción futura programada (ej: 'send_whatsapp' o 'speak')\",\n";
+        fullPrompt += "  \"time\": \"Opcional. SOLO si action es 'schedule_task', pon aquí la hora en formato HH:MM (ej: '14:00')\",\n";
+        fullPrompt += "  \"action_type\": \"Opcional. Si action es 'schedule_task' (ej: 'send_whatsapp'). Si action es 'create_document', pon el formato (ej: 'doc', 'excel', 'ppt')\",\n";
         fullPrompt += "  \"reply\": \"Lo que le vas a decir al usuario por voz (siempre en español, amigable y corto)\" \n}\n\n";
+        fullPrompt += "Si el usuario TE PIDE CREAR UN INFORME, DOCUMENTO, WORD, EXCEL O PRESENTACIÓN (POWERPOINT) (ej: 'hazme un informe con normas apa sobre ingeniería basándote en este link'), usa 'action': 'create_document'. En 'target' pon el tema y en 'action_type' pon el formato ('doc', 'excel', 'ppt', 'pdf'). IMPORTANTE: Si el usuario te pasa un enlace web (http...) o la ruta de un PDF (.pdf), guárdalo EXACTAMENTE en la propiedad 'message'. Si no hay link/archivo, déjala vacía.\n";
         fullPrompt += "Si el usuario TE PIDE CREAR UN PROMPT DETALLADO o FABRICAR UN PROMPT o diseñar una estructura de proyecto/código para abrir en VS Code (ej: 'creá un prompt detallado sobre una página web de turnos'), usa 'action': 'generate_prompt' y en 'target' pon la temática (ej: 'página web de turnos').\n";
         fullPrompt += "Si la petición requiere ejecutar una acción en Python o el Sistema, coloca 'reply' confirmándolo (ej: 'Abriendo Spotify...', 'Enviando mensaje...') y usa la 'action' correcta.\n";
         fullPrompt += "Si el usuario TE PIDE QUE PROGRAMES UNA TAREA A UNA HORA o que mandes un mensaje LUEGO / MÁS TARDE en una hora específica (ej: 'mándale un mensaje a ma a las 14:00'), usa 'action': 'schedule_task'. Llena 'target' con la persona o cosa, 'message' con lo que hay que enviar o decir, 'action_type' con la acción real ('send_whatsapp' o 'speak' o 'open_app'), y 'time' con la hora 'HH:MM'.\n";
@@ -172,6 +173,147 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                 // Transformar "gabi con i latina" a solo "gabi"
             }
 
+            if (intent.action === "create_document") {
+                const fs = require('fs');
+                const path = require('path');
+                const { exec } = require('child_process');
+                
+                console.log(`[Jarvis Office] 📚 Generando documento en formato ${intent.action_type} para: ${intent.target}`);
+                
+                // --- INYECCIÓN DE CONTEXTO (RAG) ---
+                let contextText = "";
+                if (intent.message && intent.message.trim() !== "") {
+                    let source = intent.message.trim();
+                    console.log(`[Jarvis Office] 🔍 Analizando fuente de información: ${source}`);
+                    try {
+                        if (source.startsWith("http")) {
+                            const cheerio = require('cheerio');
+                            const res = await fetch(source);
+                            const html = await res.text();
+                            const $ = cheerio.load(html);
+                            $('script, style, noscript, header, footer, nav').remove();
+                            contextText = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 15000); 
+                            console.log(`[Jarvis Office] ✅ Extraídos ${contextText.length} caracteres de la web.`);
+                        } else if (source.toLowerCase().endsWith(".pdf")) {
+                            const pdfParse = require('pdf-parse');
+                            let pdfPath = source.replace(/['"]/g, '');
+                            if (fs.existsSync(pdfPath)) {
+                                const dataBuffer = fs.readFileSync(pdfPath);
+                                const pdfData = await pdfParse(dataBuffer);
+                                contextText = pdfData.text.replace(/\s+/g, ' ').trim().substring(0, 15000);
+                                console.log(`[Jarvis Office] ✅ Extraídos ${contextText.length} caracteres del PDF.`);
+                            } else {
+                                console.log(`[Jarvis Office] ❌ Archivo PDF no encontrado en la ruta: ${pdfPath}`);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("[Jarvis Office] Error extrayendo contexto:", err.message);
+                    }
+                }
+                
+                // Generar contenido con IA primero
+                let docPrompt = `El usuario necesita que redactes contenido PROFUNDO y DETALLADO para un documento (${intent.action_type}) sobre: "${intent.target}". \n`;
+                if (contextText) {
+                    docPrompt += `\nUSA ESTA INFORMACIÓN COMO BASE OBLIGATORIA (Resume y estructura lo más importante):\n--- INICIO DE FUENTE ---\n${contextText}\n--- FIN DE FUENTE ---\n\n`;
+                }
+                docPrompt += `Por favor, genera la información completa, estructurada y sin introducciones. Si es un informe, hazlo largo y detallado con títulos formales. Si es para PowerPoint, sepáralo por diapositivas marcadas. Si es Excel, ponlo en un formato de tabla simple separada por barras verticales (|). NO devuelvas JSON, devuelve solo texto útil.`;
+                
+                try {
+                    const aiResp = await fetch('http://127.0.0.1:11434/api/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: 'llama3', prompt: docPrompt, stream: false })
+                    });
+                    const aiData = await aiResp.json();
+                    let generatedContent = aiData.response;
+                    
+                    const fileNameBase = `Doc_${intent.target.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30)}_${Date.now()}`;
+                    const os = require('os');
+                    const targetDir = 'C:\\Users\\Rodrigo\\Desktop\\Generado';
+                    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+                    
+                    let finalPath = "";
+                    let commandToOpen = "";
+
+                    if (intent.action_type === "doc") {
+                        const { Document, Packer, Paragraph, TextRun } = require('docx');
+                        
+                        // Crear documento de Word simple dividiendo por líneas
+                        const lines = generatedContent.split('\n');
+                        const children = lines.map(line => new Paragraph({ children: [new TextRun(line)] }));
+                        
+                        const doc = new Document({
+                            sections: [{ properties: {}, children: children }]
+                        });
+                        
+                        finalPath = path.join(targetDir, `${fileNameBase}.docx`);
+                        const buffer = await Packer.toBuffer(doc);
+                        fs.writeFileSync(finalPath, buffer);
+                        commandToOpen = process.platform === 'win32' ? `start "" "${finalPath}"` : `open "${finalPath}"`;
+                        
+                    } else if (intent.action_type === "ppt") {
+                        const pptxgen = require('pptxgenjs');
+                        let pptx = new pptxgen();
+                        
+                        // Dividir por bloques (ej: "Diapositiva X:" generado por la IA)
+                        const slidesRaw = generatedContent.split(/(?:Diapositiva \d+:?|\n\n)/i).filter(s => s.trim().length > 0);
+                        
+                        slidesRaw.forEach(slideText => {
+                            let slide = pptx.addSlide();
+                            // Agregar texto, centrado
+                            slide.addText(slideText.trim().substring(0, 500), { x: 0.5, y: 0.5, w: '90%', h: '90%', fontSize: 18, color: "363636", align: pptx.AlignH.center });
+                        });
+                        
+                        finalPath = path.join(targetDir, `${fileNameBase}.pptx`);
+                        await pptx.writeFile({ fileName: finalPath });
+                        commandToOpen = process.platform === 'win32' ? `start "" "${finalPath}"` : `open "${finalPath}"`;
+                        
+                    } else if (intent.action_type === "excel") {
+                        const xlsx = require('xlsx');
+                        
+                        // Intentar parsear las líneas de tabla (ej: col1 | col2 | col3)
+                        const lines = generatedContent.split('\n').filter(line => line.trim().length > 0);
+                        const aoa = lines.map(line => line.split('|').map(cell => cell.trim()));
+                        
+                        const ws = xlsx.utils.aoa_to_sheet(aoa);
+                        const wb = xlsx.utils.book_new();
+                        xlsx.utils.book_append_sheet(wb, ws, "Hoja1");
+                        
+                        finalPath = path.join(targetDir, `${fileNameBase}.xlsx`);
+                        xlsx.writeFile(wb, finalPath);
+                        commandToOpen = process.platform === 'win32' ? `start "" "${finalPath}"` : `open "${finalPath}"`;
+                    } else if (intent.action_type === "pdf") {
+                        const PDFDocument = require('pdfkit');
+                        const doc = new PDFDocument();
+                        finalPath = path.join(targetDir, `${fileNameBase}.pdf`);
+                        
+                        doc.pipe(fs.createWriteStream(finalPath));
+                        doc.fontSize(12).text(generatedContent, { align: 'justify' });
+                        doc.end();
+                        
+                        commandToOpen = process.platform === 'win32' ? `start "" "${finalPath}"` : `open "${finalPath}"`;
+                    } else {
+                        // Fallback a txt si action no está bien
+                        finalPath = path.join(targetDir, `${fileNameBase}.txt`);
+                        fs.writeFileSync(finalPath, generatedContent, 'utf8');
+                        commandToOpen = process.platform === 'win32' ? `start "" "${finalPath}"` : `open "${finalPath}"`;
+                    }
+                    
+                    console.log(`[Jarvis Office] 📄 Archivo listo: ${finalPath}`);
+                    exec(commandToOpen, (err) => {
+                        if (err) console.error("No se pudo abrir el documento:", err);
+                    });
+                    
+                    conversationHistory.push({ role: "user", content: userText });
+                    conversationHistory.push({ role: "assistant", content: intent });
+                    return intent.reply || `He generado tu documento sobre ${intent.target} y lo he abierto.`;
+
+                } catch (e) {
+                    console.error("Error generando el documento:", e);
+                    return "Hubo un fallo generando el archivo Office pedido.";
+                }
+            }
+
             if (intent.action === "generate_prompt") {
                 const fs = require('fs');
                 const path = require('path');
@@ -195,11 +337,13 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                     const promptData = await promptResponse.json();
                     let promptDoc = promptData.response;
                     
+                    const os = require('os');
                     const fileName = `Prompt_${intent.target.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.md`;
-                    const filePath = path.join(__dirname, '..', 'data', fileName);
+                    const targetDir = 'C:\\Users\\Rodrigo\\Desktop\\Generado';
+                    const filePath = path.join(targetDir, fileName);
                     
-                    if (!fs.existsSync(path.join(__dirname, '..', 'data'))) {
-                        fs.mkdirSync(path.join(__dirname, '..', 'data'), { recursive: true });
+                    if (!fs.existsSync(targetDir)) {
+                        fs.mkdirSync(targetDir, { recursive: true });
                     }
                     
                     fs.writeFileSync(filePath, promptDoc, 'utf8');
