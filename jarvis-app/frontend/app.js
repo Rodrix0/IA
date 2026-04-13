@@ -60,7 +60,7 @@ if (SpeechRecognition) {
         
         document.getElementById('context-url').value = "";
         document.getElementById('context-file-path').value = "";
-        document.getElementById('dropzone-text').textContent = "Arrastra un archivo aquí (.pdf) o haz clic";
+        document.getElementById('dropzone-text').textContent = "Arrastra múltiples archivos aquí (.pdf) o haz clic";
     };
 
     recognition.onend = () => {
@@ -300,7 +300,7 @@ document.getElementById('btn-send-text').addEventListener('click', () => {
     textInput.value = "";
     document.getElementById('context-url').value = "";
     document.getElementById('context-file-path').value = "";
-    document.getElementById('dropzone-text').textContent = "Arrastra un archivo aquí (.pdf) o haz clic";
+    document.getElementById('dropzone-text').textContent = "Arrastra múltiples archivos aquí (.pdf) o haz clic";
 });
 
 document.getElementById('manual-text-input').addEventListener('keypress', (e) => {
@@ -341,7 +341,7 @@ function handleDrop(e) {
 
 function handleFiles(files) {
     if (files.length === 0) return;
-    uploadFile(files[0]);
+    Array.from(files).forEach(file => uploadFile(file));
 }
 
 function uploadFile(file) {
@@ -357,8 +357,11 @@ function uploadFile(file) {
     .then(response => response.json())
     .then(data => {
         if (data.filepath) {
-            filePathInput.value = data.filepath;
-            dropzoneText.textContent = `✅ Archivo subido: ${file.name}`;
+            let currentStr = filePathInput.value;
+            filePathInput.value = currentStr ? currentStr + " | " + data.filepath : data.filepath;
+            
+            let parts = filePathInput.value.split(" | ").filter(i => i.trim());
+            dropzoneText.textContent = `✅ ${parts.length} archivo(s) subido(s) listos`;
             console.log("Archivo guardado en:", data.filepath);
         } else {
             dropzoneText.textContent = "❌ Error subiendo archivo";
@@ -368,6 +371,7 @@ function uploadFile(file) {
         dropzoneText.textContent = "❌ Fallo en la red al subir";
     });
 }
+
 
 
 

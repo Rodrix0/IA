@@ -180,49 +180,99 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                 
                 console.log(`[Jarvis Office] 📚 Generando documento en formato ${intent.action_type} para: ${intent.target}`);
                 
-                // --- INYECCIÓN DE CONTEXTO (RAG) ---
+                // --- INYECCIÓN DE CONTEXTO (RAG) MULTIPLE AVANZADO ---
                 let contextText = "";
                 if (intent.message && intent.message.trim() !== "") {
-                    let source = intent.message.trim();
-                    console.log(`[Jarvis Office] 🔍 Analizando fuente de información: ${source}`);
-                    try {
-                        if (source.startsWith("http")) {
-                            const cheerio = require('cheerio');
-                            const res = await fetch(source);
-                            const html = await res.text();
-                            const $ = cheerio.load(html);
-                            $('script, style, noscript, header, footer, nav').remove();
-                            contextText = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 15000); 
-                            console.log(`[Jarvis Office] ✅ Extraídos ${contextText.length} caracteres de la web.`);
-                        } else if (source.toLowerCase().endsWith(".pdf")) {
-                            const pdfParse = require('pdf-parse');
-                            let pdfPath = source.replace(/['"]/g, '');
-                            if (fs.existsSync(pdfPath)) {
-                                const dataBuffer = fs.readFileSync(pdfPath);
-                                const pdfData = await pdfParse(dataBuffer);
-                                contextText = pdfData.text.replace(/\s+/g, ' ').trim().substring(0, 15000);
-                                console.log(`[Jarvis Office] ✅ Extraídos ${contextText.length} caracteres del PDF.`);
-                            } else {
-                                console.log(`[Jarvis Office] ❌ Archivo PDF no encontrado en la ruta: ${pdfPath}`);
+                    let allChunks = [];
+                    let sourcesList = intent.message.trim().split(/\||\s+(?=http|[a-zA-Z]:\\|\/)/);
+                    for (let s of sourcesList) {
+                        let source = s.trim().replace(/['"]/g, '');
+                        if (!source) continue;
+                        
+                        console.log(`[Jarvis RAG] 🔍 Analizando fuente en profundidad: ${source}`);
+                        try {
+                            let textExtracted = "";
+                            if (source.startsWith("http")) {
+                                const cheerio = require('cheerio');
+                                const res = await fetch(source);
+                                const html = await res.text();
+                                const $ = cheerio.load(html);
+                                $('script, style, noscript, header, footer, nav').remove();
+                                textExtracted = $('body').text().replace(/\s+/g, ' '); 
+                                console.log(`[Jarvis RAG] ✅ Web cargada en memoria.`);
+                            } else if (source.toLowerCase().endsWith(".pdf")) {
+                                const pdfParse = require('pdf-parse');
+                                if (fs.existsSync(source)) {
+                                    const dataBuffer = fs.readFileSync(source);
+                                    const pdfData = await pdfParse(dataBuffer);
+                                    textExtracted = pdfData.text.replace(/\s+/g, ' ');
+                                    console.log(`[Jarvis RAG] ✅ PDF cargado completo: ${textExtracted.length} caracteres leídos.`);
+                                } else {
+                                    console.log(`[Jarvis RAG] ❌ Archivo PDF no encontrado: ${source}`);
+                                }
+                            }
+                            
+                            // Fragmentar el libro/doc en bloques legibles de ~3000 caracteres (aprox 1 hoja)
+                            if (textExtracted) {
+                                let parts = textExtracted.match(/.{1,3000}(?=\s|$)/g) || [textExtracted];
+                                parts.forEach(p => allChunks.push({ text: p, source: source }));
+                            }
+                        } catch (err) {
+                            console.error(`[Jarvis RAG] Error extrayendo ${source}:`, err.message);
+                        }
+                    }
+                    
+                    // IA de Búsqueda y Filtrado Inteligente (Evita colapsar la RAM sacando solo lo importante)
+                    if(allChunks.length > 0) {
+                        console.log(`[Jarvis RAG] 🧠 Filtrando ${allChunks.length} páginas/bloques buscando lo más relevante a "${intent.target}"...`);
+                        
+                        let keywords = intent.target.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+                        if (keywords.length === 0) keywords = intent.target.toLowerCase().split(/\s+/);
+                        
+                        allChunks.forEach(chunk => {
+                            let score = 0;
+                            let lowerText = chunk.text.toLowerCase();
+                            // Puntuar qué bloques de texto mencionan lo que el usuario quiere
+                            keywords.forEach(kw => { if(lowerText.includes(kw)) score += 1; });
+                            chunk.score = score;
+                        });
+                        
+                        // Ordenar de mayor a menor relevancia
+                        allChunks.sort((a,b) => b.score - a.score);
+                        
+                        // Ensamblar contexto final (hasta ~80.000 chars = ~20.000 tokens)
+                        for(let c of allChunks) {
+                            if (contextText.length > 80000) break;
+                            if (c.score > 0 || contextText.length < 15000) { 
+                                contextText += `\n[Fuente: ${c.source}] ...${c.text}...\n`;
                             }
                         }
-                    } catch (err) {
-                        console.error("[Jarvis Office] Error extrayendo contexto:", err.message);
+                        console.log(`[Jarvis RAG] 💡 Datos filtrados a entregar al cerebro principal: ${contextText.length} caracteres extraídos puramente en contexto.`);
                     }
                 }
                 
                 // Generar contenido con IA primero
-                let docPrompt = `El usuario necesita que redactes contenido PROFUNDO y DETALLADO para un documento (${intent.action_type}) sobre: "${intent.target}". \n`;
+                let docPrompt = `El usuario necesita que redactes un contenido PROFUNDO, EXTENSO y EXTREMADAMENTE DETALLADO para un documento (${intent.action_type}) sobre: "${intent.target}". \n`;
                 if (contextText) {
-                    docPrompt += `\nUSA ESTA INFORMACIÓN COMO BASE OBLIGATORIA (Resume y estructura lo más importante):\n--- INICIO DE FUENTE ---\n${contextText}\n--- FIN DE FUENTE ---\n\n`;
+                    docPrompt += `\nUSA ESTA INFORMACIÓN COMO BASE OBLIGATORIA (Explica cada punto a fondo, en formato largo y explayado):\n--- INICIO DE FUENTES SELECCIONADAS ---\n${contextText}\n--- FIN DE FUENTES SELECCIONADAS ---\n\n`;
                 }
-                docPrompt += `Por favor, genera la información completa, estructurada y sin introducciones. Si es un informe, hazlo largo y detallado con títulos formales. Si es para PowerPoint, sepáralo por diapositivas marcadas. Si es Excel, ponlo en un formato de tabla simple separada por barras verticales (|). NO devuelvas JSON, devuelve solo texto útil.`;
+                docPrompt += `Por favor, genera la información completa, estructurada y bien explicada. \nNO devuelvas un resumen corto, necesito que escribas MUCHO contenido en profundidad. \nSi es un informe, hazlo largo y detallado con párrafos extensos y títulos formales. Si es para PowerPoint, sepáralo por diapositivas (con 5-8 viñetas detalladas cada una). Si es Excel, usa barras verticales (|). NO DEVUELVAS NINGÚN JSON NI INTRODUCCIONES. Solo devuelve el texto final directo al documento.`;
                 
                 try {
                     const aiResp = await fetch('http://127.0.0.1:11434/api/generate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model: 'llama3', prompt: docPrompt, stream: false })
+                        // Expandimos el contexto de la memoria del modelo fuertemente
+                        body: JSON.stringify({ 
+                            model: 'llama3', 
+                            prompt: docPrompt, 
+                            stream: false,
+                            options: {
+                                num_ctx: 24000,
+                                num_predict: 2000, 
+                                temperature: 0.3
+                            }
+                        })
                     });
                     const aiData = await aiResp.json();
                     let generatedContent = aiData.response;
