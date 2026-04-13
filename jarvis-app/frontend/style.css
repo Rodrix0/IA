@@ -374,3 +374,86 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
 ::-webkit-scrollbar-thumb { background: var(--primary-cyan); border-radius: 3px; }
+
+/* --- PANEL DE CONTEXTO RAG --- */
+.context-input-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 15px auto;
+    width: 90%;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(0,255,255,0.4);
+}
+
+.context-group {
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(0,255,255,0.2);
+    border-radius: 5px;
+    padding: 10px;
+}
+
+.context-group i {
+    color: #00ffff;
+    margin-right: 10px;
+    font-size: 1.1rem;
+}
+
+.context-group input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 1rem;
+    outline: none;
+}
+
+.context-group input::placeholder {
+    color: rgba(255,255,255,0.4);
+}
+
+.context-group.input-text {
+    border-color: #00ffff;
+    background: rgba(0, 255, 255, 0.1);
+}
+
+.context-group.input-text button {
+    background: transparent;
+    border: none;
+    color: #00ffff;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: 0.3s;
+}
+.context-group.input-text button:hover {
+    color: #fff;
+    transform: scale(1.1);
+}
+
+/* Área Drag and Drop */
+.file-dropzone {
+    cursor: pointer;
+    justify-content: center;
+    border: 2px dashed rgba(0, 255, 255, 0.4) !important;
+    transition: all 0.3s ease;
+    text-align: center;
+}
+.file-dropzone:hover, .file-dropzone.dragover {
+    background: rgba(0, 255, 255, 0.2) !important;
+    border-color: #00ffff !important;
+    transform: scale(1.02);
+}
+.file-dropzone span {
+    font-family: 'Rajdhani', sans-serif;
+    color: #fff;
+    opacity: 0.8;
+}
+.file-dropzone i {
+    font-size: 1.5rem !important;
+}
+

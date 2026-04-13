@@ -26,6 +26,35 @@ app.use(express.json());
 // Servir frontend si se corre el server directo (opcional para facilidad)
 app.use(express.static(path.join(__dirname, '../frontend')));
 
+// --- NUEVO: RUTA PARA SUBIR ARCHIVOS (RAG) ---
+const multer = require('multer');
+const fs = require('fs');
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const uploadDir = path.join(__dirname, 'data', 'uploads');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '_' + file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, ''));
+    }
+});
+const upload = multer({ storage: storage });
+
+app.post('/api/upload', upload.single('file'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: "No se subió ningún archivo." });
+    }
+    // Return absolute path
+    const absolutePath = req.file.path;
+    console.log(`[Servidor] 💾 Archivo recibido y guardado en: ${absolutePath}`);
+    res.json({ filepath: absolutePath });
+});
+// ----------------------------------------------
+
 // API Rest para Modos (usado por el cliente cuando quiere crear nuevos modos usando la interfaz)
 app.get('/api/modes', (req, res) => {
     res.json(modeService.getAllModes());
