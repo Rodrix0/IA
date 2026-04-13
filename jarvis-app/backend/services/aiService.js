@@ -66,12 +66,13 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         fullPrompt += "Estás actuando como el cerebro de un Asistente Virtual Híbrido.\n";
         fullPrompt += "=== REGLA DE SUPERVIVENCIA ABSOLUTA ===\n";
         fullPrompt += "Tu ÚNICA salida debe ser un objeto JSON válido con la siguiente estructura y NADA MÁS:\n";
-        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, clear_reminders, chat\",\n";
-        fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'Juan', 'Chrome', 'el clima')\",\n";
+        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, clear_reminders, generate_prompt, chat\",\n";
+        fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'Juan', 'Chrome', 'el clima', 'página web de turnos')\",\n";
         fullPrompt += "  \"message\": \"El mensaje o contenido de la acción (si aplica)\",\n";
         fullPrompt += "  \"time\": \"Opcional. SOLO si action es 'schedule_task', pon aquí la hora en formato HH:MM (ej: '14:00', '09:30')\",\n";
         fullPrompt += "  \"action_type\": \"Opcional. SOLO si action es 'schedule_task', describe la acción futura programada (ej: 'send_whatsapp' o 'speak')\",\n";
         fullPrompt += "  \"reply\": \"Lo que le vas a decir al usuario por voz (siempre en español, amigable y corto)\" \n}\n\n";
+        fullPrompt += "Si el usuario TE PIDE CREAR UN PROMPT DETALLADO o FABRICAR UN PROMPT o diseñar una estructura de proyecto/código para abrir en VS Code (ej: 'creá un prompt detallado sobre una página web de turnos'), usa 'action': 'generate_prompt' y en 'target' pon la temática (ej: 'página web de turnos').\n";
         fullPrompt += "Si la petición requiere ejecutar una acción en Python o el Sistema, coloca 'reply' confirmándolo (ej: 'Abriendo Spotify...', 'Enviando mensaje...') y usa la 'action' correcta.\n";
         fullPrompt += "Si el usuario TE PIDE QUE PROGRAMES UNA TAREA A UNA HORA o que mandes un mensaje LUEGO / MÁS TARDE en una hora específica (ej: 'mándale un mensaje a ma a las 14:00'), usa 'action': 'schedule_task'. Llena 'target' con la persona o cosa, 'message' con lo que hay que enviar o decir, 'action_type' con la acción real ('send_whatsapp' o 'speak' o 'open_app'), y 'time' con la hora 'HH:MM'.\n";
         fullPrompt += "Si el usuario pregunta QUÉ TIENE QUE HACER, o SUS TAREAS / RECORDATORIOS (ej: 'qué tengo para hacer hoy', 'revisá mis recordatorios', 'fijate en mi app'), usa la acción 'check_reminders'. Tu 'reply' debe confirmar que lo revisarás.\n";
@@ -169,6 +170,55 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                 // Removemos las aclaraciones fonéticas sucias por si la IA falló en borrarlas
                 intent.target = intent.target.replace(/\s+con\s+(i\s*latina|i\s*griega|y|s|z|c|b|v\s*corta|v|h)\s*/gi, '').trim();
                 // Transformar "gabi con i latina" a solo "gabi"
+            }
+
+            if (intent.action === "generate_prompt") {
+                const fs = require('fs');
+                const path = require('path');
+                const { exec } = require('child_process');
+                
+                console.log(`[Jarvis Prompt Engineer] ✍️ Generando documento detallado para: ${intent.target}`);
+                
+                // Pedimos a Ollama que redacte un prompt bien detallado
+                const pPrompt = `El usuario quiere que escribas un prompt increíblemente detallado, profesional y estructurado sobre: "${intent.target}".\nActúa como un experto en ingeniería de software. Escribe TODO el contenido del prompt en formato Markdown (arquitectura, tecnologías frontend/backend, paso a paso, buenas prácticas, etc).\nIMPORTANTE: No uses introducciones, no devuelvas JSON. Solo devuelve el Markdown puro.`;
+                
+                try {
+                    const promptResponse = await fetch('http://127.0.0.1:11434/api/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: 'llama3', 
+                            prompt: pPrompt,
+                            stream: false
+                        })
+                    });
+                    const promptData = await promptResponse.json();
+                    let promptDoc = promptData.response;
+                    
+                    const fileName = `Prompt_${intent.target.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.md`;
+                    const filePath = path.join(__dirname, '..', 'data', fileName);
+                    
+                    if (!fs.existsSync(path.join(__dirname, '..', 'data'))) {
+                        fs.mkdirSync(path.join(__dirname, '..', 'data'), { recursive: true });
+                    }
+                    
+                    fs.writeFileSync(filePath, promptDoc, 'utf8');
+                    console.log(`[Jarvis Prompt Engineer] 📄 Documento creado en: ${fileName}`);
+                    
+                    // Abrir en VS Code usando el comando code
+                    exec(`code "${filePath}"`, (err) => {
+                        if (err) console.error("No se pudo abrir VS Code:", err);
+                    });
+                    
+                    conversationHistory.push({ role: "user", content: userText });
+                    conversationHistory.push({ role: "assistant", content: intent });
+                    if (conversationHistory.length > 10) conversationHistory = conversationHistory.slice(-10);
+                    
+                    return intent.reply || `He generado el prompt sobre ${intent.target} y lo he abierto en Visual Studio Code.`;
+                } catch (e) {
+                    console.error("Error generando el prompt:", e);
+                    return "Hubo un error al intentar generar el archivo de prompt.";
+                }
             }
 
             if (intent.action === "open_app") {
