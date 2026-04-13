@@ -3,7 +3,7 @@ const cheerio = require('cheerio');
 // Eliminamos las credenciales de Google porque ahora somos 100% locales
 let conversationHistory = [];
 
-async function performInvisibleSearch(query) {
+async function performInvisibleSearch(query, maxLength = 3000) {
     console.log(`\n[Agente Araña] 🕸️ Infiltrando motor de búsqueda secundario (Yahoo) para: "${query}"...`);
     try {
         const response = await fetch(`https://es.search.yahoo.com/search?p=${encodeURIComponent(query)}`, {
@@ -22,8 +22,10 @@ async function performInvisibleSearch(query) {
         let scrapedText = $('#main').text() || $('body').text();
         scrapedText = scrapedText.replace(/\s+/g, ' ').trim();
         
-        // Le pasamos los primeros 2500 caracteres a Llama 3
-        scrapedText = scrapedText.substring(0, 2500);
+        // Le pasamos los caracteres especificados a Llama 3
+        if (maxLength > 0) {
+            scrapedText = scrapedText.substring(0, maxLength);
+        }
         
         if (!scrapedText.trim()) {
             return "El túnel de búsqueda está bloqueado, no se obtuvieron resultados.";
@@ -72,7 +74,7 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         fullPrompt += "  \"time\": \"Opcional. SOLO si action es 'schedule_task', pon aquí la hora en formato HH:MM (ej: '14:00')\",\n";
         fullPrompt += "  \"action_type\": \"Opcional. Si action es 'schedule_task' (ej: 'send_whatsapp'). Si action es 'create_document', pon el formato (ej: 'doc', 'excel', 'ppt')\",\n";
         fullPrompt += "  \"reply\": \"Lo que le vas a decir al usuario por voz (siempre en español, amigable y corto)\" \n}\n\n";
-        fullPrompt += "Si el usuario TE PIDE CREAR UN INFORME, DOCUMENTO, WORD, EXCEL O PRESENTACIÓN (POWERPOINT) (ej: 'hazme un informe con normas apa sobre ingeniería basándote en este link'), usa 'action': 'create_document'. En 'target' pon el tema y en 'action_type' pon el formato ('doc', 'excel', 'ppt', 'pdf'). IMPORTANTE: Si el usuario te pasa un enlace web (http...) o la ruta de un PDF (.pdf), guárdalo EXACTAMENTE en la propiedad 'message'. Si no hay link/archivo, déjala vacía.\n";
+        fullPrompt += "Si el usuario TE PIDE CREAR UN INFORME, DOCUMENTO, WORD, EXCEL O PRESENTACIÓN (POWERPOINT) (ej: 'hazme un informe con normas apa sobre ingeniería basándote en este link'), usa 'action': 'create_document'. En 'target' pon el tema y en 'action_type' pon el formato ('doc', 'excel', 'ppt', 'pdf'). IMPORTANTE: Si el usuario te pasa un enlace web (http...) o la ruta de un PDF (.pdf), guárdalo EXACTAMENTE en la propiedad 'message'. Si el usuario te pide que busques la información en Google/Internet por él (ej: 'crea un doc sobre automata buscando en google'), escribe la palabra exacta 'search_web' dentro de 'message'. Si no pide buscar en internet ni te da un archivo, déjala vacía.\n";
         fullPrompt += "Si el usuario TE PIDE CREAR UN PROMPT DETALLADO o FABRICAR UN PROMPT o diseñar una estructura de proyecto/código para abrir en VS Code (ej: 'creá un prompt detallado sobre una página web de turnos'), usa 'action': 'generate_prompt' y en 'target' pon la temática (ej: 'página web de turnos').\n";
         fullPrompt += "Si la petición requiere ejecutar una acción en Python o el Sistema, coloca 'reply' confirmándolo (ej: 'Abriendo Spotify...', 'Enviando mensaje...') y usa la 'action' correcta.\n";
         fullPrompt += "Si el usuario TE PIDE QUE PROGRAMES UNA TAREA A UNA HORA o que mandes un mensaje LUEGO / MÁS TARDE en una hora específica (ej: 'mándale un mensaje a ma a las 14:00'), usa 'action': 'schedule_task'. Llena 'target' con la persona o cosa, 'message' con lo que hay que enviar o decir, 'action_type' con la acción real ('send_whatsapp' o 'speak' o 'open_app'), y 'time' con la hora 'HH:MM'.\n";
@@ -192,7 +194,12 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                         console.log(`[Jarvis RAG] 🔍 Analizando fuente en profundidad: ${source}`);
                         try {
                             let textExtracted = "";
-                            if (source.startsWith("http")) {
+                            if (source === "search_web") {
+                                console.log(`[Jarvis RAG] 🕸️ Investigando en la nube para auto-redactar el doc: "${intent.target}"...`);
+                                // Buscamos en Yahoo pero extraemos más texto límite para mejor redacción de la IA
+                                const searchRes = await performInvisibleSearch(intent.target, 20000); // 20k ch limit para contexto
+                                textExtracted = searchRes || "No hay resultados.";
+                            } else if (source.startsWith("http")) {
                                 const cheerio = require('cheerio');
                                 const res = await fetch(source);
                                 const html = await res.text();
