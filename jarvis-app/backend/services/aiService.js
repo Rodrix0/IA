@@ -3,6 +3,82 @@ const cheerio = require('cheerio');
 // Eliminamos las credenciales de Google porque ahora somos 100% locales
 let conversationHistory = [];
 
+function extractRecipientFromCurrentUtterance(text) {
+    if (!text || typeof text !== 'string') return '';
+
+    const cleaned = text
+        .trim()
+        .replace(/["'`´]+/g, '')
+        .replace(/[\u0000-\u001F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/[.!,;:?]+$/g, '');
+
+    // Casos: "manda ... a analistas", "envía ... para analistas"
+    const m = cleaned.match(/\b(?:manda(?:r)?|env[ií]a(?:r)?|m[aá]ndale|env[ií]ale?)\b[\s\S]*?\b(?:a|para)\s+([a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ][a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ\s._-]{1,80})$/i);
+    if (!m || !m[1]) return '';
+
+    let recipient = m[1].trim();
+    recipient = recipient
+        .replace(/\b(?:por favor|gracias|porfa|ahora|ya)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return recipient;
+}
+
+function getLastAssistantReplyFromHistory() {
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+        const msg = conversationHistory[i];
+        if (msg.role !== 'assistant') continue;
+        if (typeof msg.content === 'string' && msg.content.trim()) return msg.content.trim();
+        if (msg.content && typeof msg.content.reply === 'string' && msg.content.reply.trim()) {
+            return msg.content.reply.trim();
+        }
+    }
+    return '';
+}
+
+function recoverIntentFromBrokenJson(rawText) {
+    if (!rawText || typeof rawText !== 'string') return null;
+
+    const cleaned = rawText.replace(/\u0000/g, '').trim();
+
+    // 1) Attempt to parse a likely JSON object slice.
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+        const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+        try {
+            return JSON.parse(candidate);
+        } catch (e) {
+            // Continue with tolerant extraction.
+        }
+    }
+
+    // 2) Tolerant regex extraction for malformed/truncated outputs.
+    const actionMatch = cleaned.match(/"action"\s*:\s*"([^"]+)"/i);
+    const targetMatch = cleaned.match(/"target"\s*:\s*"([\s\S]*?)"\s*(,|\n|\r|$)/i);
+    const messageMatch = cleaned.match(/"message"\s*:\s*"([\s\S]*?)"\s*(,|\n|\r|$)/i);
+    const replyStart = cleaned.match(/"reply"\s*:\s*"([\s\S]*)$/i);
+
+    if (!actionMatch && !replyStart) return null;
+
+    let reply = replyStart ? replyStart[1] : '';
+    reply = reply
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/[\u0000-\u001F]/g, ' ')
+        .replace(/[",\s}]*$/, '')
+        .trim();
+
+    return {
+        action: actionMatch ? actionMatch[1] : 'chat',
+        target: targetMatch ? targetMatch[1].trim() : '',
+        message: messageMatch ? messageMatch[1].trim() : '',
+        reply: reply || 'No pude estructurar el JSON completo, pero pude recuperar la respuesta principal.'
+    };
+}
+
 async function performInvisibleSearch(query, maxLength = 3000) {
     console.log(`\n[Agente Araña] 🕸️ Infiltrando motor de búsqueda secundario (Yahoo) para: "${query}"...`);
     try {
@@ -58,7 +134,15 @@ async function fetchOllamaResponse(prompt) {
         return JSON.parse(data.response); // Parseamos el JSON que nos dio Ollama
     } catch (e) {
         console.error("Error parseando respuesta JSON de Ollama:", data.response);
-        return { action: "chat", reply: "Hubo un error interpretando mi cerebro neuronal." };
+        const recovered = recoverIntentFromBrokenJson(data.response);
+        if (recovered) {
+            console.warn("[Parser Tolerante] Se recuperó una respuesta utilizable desde JSON inválido.");
+            return recovered;
+        }
+        return {
+            action: "chat",
+            reply: "No pude estructurar la respuesta en JSON, pero sigo operativo. Repite tu pedido y lo intento de nuevo."
+        };
     }
 }
 
@@ -85,6 +169,7 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         fullPrompt += "Si el usuario te pide ABRIR, BUSCAR o PONER algo dentro de una aplicación web para que ÉL lo vea (ej: 'abrir chat gpt y buscar conejos', 'abre youtube y pon la cobra', 'busca motos en google'), debes usar 'open_app'. IMPORTANTE: En el 'target', incluye el nombre de la app junto con lo que quiere buscar (ej: 'chat gpt buscar conejos', 'youtube la cobra', 'google comprar motos'). NUNCA uses 'search_web' si el usuario te está pidiendo que abras la página.\n";
         fullPrompt += "Si es simplemente abrir un juego o app nativa limpia (ej: 'abrime el lol', 'iniciá el lol', 'poné el netflix'), usa 'open_app' y pon ÚNICAMENTE el nombre limpio en 'target' sin verbos.\n";
         fullPrompt += "Si es mandar WhatsApp o correo, usa 'send_whatsapp' o 'send_email', pon exactamente EL NOMBRE DEL CONTACTO (el que escuchas, con sus nombres, apellidos o emojis fonéticos) en 'target' y EL TEXTO A ENVIAR en 'message'.\n";
+        fullPrompt += "Si el usuario dice 'manda eso', 'con esa información', 'con esa info', 'envía lo anterior' o similares, entonces en 'message' debes copiar literalmente la ÚLTIMA respuesta que tú le diste en la conversación (no inventar ni resumir).\n";
         fullPrompt += "Para WhatsApp, es VITAL que resuelvas el target tal cual lo dice el usuario. Ejemplo: si dice 'enviale a los pibes nashe', tu target DEBE ser 'los pibes nashe'.\n";
         fullPrompt += "REGLA DE ORTOGRAFÍA EN NOMBRES: Si el usuario te aclara cómo se escribe el nombre (ej: 'gabi con i latina', 'gaby con i griega', 'con s', 'con z'), APLICA esa conversión ortográfica tú mismo en el 'target' (ej: 'gaby' o 'gabi') pero NUNCA incluyas la frase de aclaración adentro del target final.\n";
         fullPrompt += "Importante: NUNCA dejes 'reply' vacío, SIEMPRE comunícate confirmando o respondiendo al usuario en esa propiedad.\n";
@@ -111,11 +196,26 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         // Obtenemos la decisión directa como objeto JSON
         let intent = await fetchOllamaResponse(fullPrompt);
 
+        // Fallback determinístico del destinatario según frase ACTUAL del usuario.
+        const recipientFromCurrentUtterance = extractRecipientFromCurrentUtterance(userText);
+        if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && recipientFromCurrentUtterance) {
+            intent.target = recipientFromCurrentUtterance;
+        }
+
+        // Fallback determinístico: si el usuario pide enviar "esa info", tomamos la última respuesta del asistente.
+        const asksPreviousInfo = /\b(con\s+esa\s+info(?:rmaci[oó]n)?|manda\s+eso|env[ií]a\s+eso|env[ií]a\s+lo\s+anterior|manda\s+lo\s+anterior|esa\s+informaci[oó]n|esa\s+info)\b/i.test(userText);
+        if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && asksPreviousInfo) {
+            const lastReply = getLastAssistantReplyFromHistory();
+            if (lastReply) {
+                intent.message = lastReply;
+            }
+        }
+
         // Si pide búsqueda y el motor principal prefiere que lo procesemos:
         if (intent.action === "search_web") {
             const searchResults = await performInvisibleSearch(intent.target || userText);
 
-            const secondPrompt = `El usuario preguntó: "${userText}".\nResultados de web:\n${searchResults}\n\nDevuelve de nuevo un JSON, pon 'action': 'chat' y usa la información para llenar 'reply'.`;
+            const secondPrompt = `El usuario preguntó: "${userText}".\nResultados de web:\n${searchResults}\n\nResponde EXCLUSIVAMENTE con un JSON válido (sin texto extra) con esta forma:\n{\n  "action": "chat",\n  "reply": "respuesta en español"\n}\nAsegúrate de escapar comillas internas dentro de reply.`;
             
             console.log(`[Agente Araña] 🧠 Procesando información y emitiendo JSON final...`);
             intent = await fetchOllamaResponse(secondPrompt);
