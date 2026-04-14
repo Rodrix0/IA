@@ -244,40 +244,90 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                             chunk.score = score;
                         });
                         
-                        // Ordenar de mayor a menor relevancia
-                        allChunks.sort((a,b) => b.score - a.score);
-                        
-                        // Ensamblar contexto final (hasta ~80.000 chars = ~20.000 tokens)
-                        for(let c of allChunks) {
-                            if (contextText.length > 80000) break;
-                            if (c.score > 0 || contextText.length < 15000) { 
-                                contextText += `\n[Fuente: ${c.source}] ...${c.text}...\n`;
-                            }
+                        // 1. Agrupar chunks por fuente
+                        let chunksBySource = {};
+                        allChunks.forEach(c => {
+                            if (!chunksBySource[c.source]) chunksBySource[c.source] = [];
+                            chunksBySource[c.source].push(c);
+                        });
+
+                        // 2. Extraer equitativamente de TODOS los archivos (Garantizar cobertura)
+                        const charsLimit = 160000; // Límite de caracteres a 160k
+                        const sourcesArray = Object.keys(chunksBySource);
+                        if(sourcesArray.length > 0) {
+                            const charsPerSource = Math.floor(charsLimit / sourcesArray.length);
+                            sourcesArray.forEach((src, index) => {
+                                // Ordenar por relevancia dentro de cada archivo
+                                let srcChunks = chunksBySource[src].sort((a, b) => b.score - a.score);
+                                let srcTextLen = 0;
+                                let chunksAdded = 0;
+                                for (let c of srcChunks) {
+                                    if (srcTextLen > charsPerSource) break;
+                                    contextText += `\n[INICIO ARCHIVO NÚMERO ${index + 1} | Fuente Original: ${src}] \n...${c.text}...\n[FIN FRAGMENTO]\n`;
+                                    srcTextLen += c.text.length;
+                                    chunksAdded++;
+                                }
+                                console.log(`[Jarvis RAG] ✅ Archivo N.º ${index + 1} ASIMILADO: Se enviaron ${srcTextLen} caracteres (de ${chunksAdded} fragmentos) desde ${src} a la IA.`);
+                            });
                         }
-                        console.log(`[Jarvis RAG] 💡 Datos filtrados a entregar al cerebro principal: ${contextText.length} caracteres extraídos puramente en contexto.`);
+                        console.log(`[Jarvis RAG] 💡 Contexto GLOBAL fusionado equitativamente: ${contextText.length} caracteres de ${sourcesArray.length} fuentes.`);
                     }
                 }
                 
                 // Generar contenido con IA primero
-                let docPrompt = `El usuario necesita que redactes un contenido PROFUNDO, EXTENSO y EXTREMADAMENTE DETALLADO para un documento (${intent.action_type}) sobre: "${intent.target}". \n`;
+                let docPrompt = `Actúa como un Especialista en Investigación Académica y Consultor Senior de Ingeniería. Tu objetivo es procesar la totalidad de los archivos cargados para generar un documento de alta densidad técnica y rigor profesional.
+
+[FASE 1: AUDITORÍA DE CONTEXTO (INTERNA)]
+Identifica cuántos archivos hay y el tema central de cada uno.
+Extrae los "Conceptos Innegociables": fórmulas, autores citados, metodologías específicas (ej. las 9 etapas), nomenclaturas técnicas (ej. Notación de Kendall) y leyes/normas.
+Si los archivos pertenecen a materias distintas, busca los puntos de conexión lógica entre ellos.
+
+[FASE 2: ESTRUCTURA DEL DOCUMENTO FINAL]
+Organiza el contenido siguiendo esta jerarquía, evitando repetir información:
+- Introducción y Marco Teórico: Define el objeto de estudio usando la terminología exacta de la fuente. Compara enfoques si hay más de un autor.
+- Desarrollo Técnico y Metodológico: Esta es la sección más densa. Desarrolla cada proceso paso a paso.
+Es OBLIGATORIO incluir las fórmulas matemáticas, variables (ej. $L, W, Q, PP$) y pruebas estadísticas/legales mencionadas.
+Describe las herramientas o software citados en el texto.
+- Casos de Aplicación y Ejemplos: Describe los escenarios reales o ejercicios prácticos que figuran en los documentos para "aterrizar" la teoría.
+- Validación y Conclusiones: Explica cómo se verifica la veracidad de los resultados y cuáles son las lecciones aprendidas.
+
+[REGLAS CRÍTICAS DE CALIDAD Y ANTI-VAGANCIA]
+- Prohibida la Redundancia: Si un concepto aparece en tres archivos, júntalos en una sola explicación profunda. No repitas párrafos ni ideas en diferentes capítulos.
+- Densidad Académica: No uses lenguaje generalista. Si el texto habla de "Equilibrio Homeostático" o "Chi-Cuadrado", usa esos términos y explica su función técnica según el autor.
+- CERO PLANTILLAS (REGLA DE ORO): Está TERMINANTEMENTE PROHIBIDO devolver un esqueleto, dejar espacios en blanco, usar marcadores como "[Desarrollar aquí]", "[Insertar fórmula]" o "etc.". TIENES QUE REDACTAR EL CONTENIDO REAL Y COMPLETO de inicio a fin. Si el texto menciona 9 etapas, desarrolla detalladamente las 9 etapas enteras. Si hay fórmulas matemáticas, escríbelas todas. NO RESUMAS PARA AHORRAR ESPACIO.
+- Invisibilidad del Proceso: No menciones "En el archivo 1 dice..." ni utilices títulos como "Fase 1". El resultado debe ser un informe fluido y profesional.
+- Citas Obligatorias: Cada afirmación técnica debe llevar su cita al final de la oración usando el formato [Archivo X].
+- Control de Alucinación: No utilices bibliografía externa a menos que los archivos la mencionen explícitamente. Prioriza los datos de los PDFs cargados.
+
+[ENTREGA]: Genera el informe COMPLETO, TOTALMENTE DESARROLLADO y LLENO DE CONTENIDO TÉCNICO REAL, listo para imprimir. Comienza a generar el contenido directamente sin preámbulos.
+
+--- DOCUMENTOS O TEXTOS EXTRAÍDOS EN MEMORIA: ---
+`;
                 if (contextText) {
-                    docPrompt += `\nUSA ESTA INFORMACIÓN COMO BASE OBLIGATORIA (Explica cada punto a fondo, en formato largo y explayado):\n--- INICIO DE FUENTES SELECCIONADAS ---\n${contextText}\n--- FIN DE FUENTES SELECCIONADAS ---\n\n`;
+                    docPrompt += `${contextText}\n\n`;
                 }
-                docPrompt += `Por favor, genera la información completa, estructurada y bien explicada. \nNO devuelvas un resumen corto, necesito que escribas MUCHO contenido en profundidad. \nSi es un informe, hazlo largo y detallado con párrafos extensos y títulos formales. Si es para PowerPoint, sepáralo por diapositivas (con 5-8 viñetas detalladas cada una). Si es Excel, usa barras verticales (|). NO DEVUELVAS NINGÚN JSON NI INTRODUCCIONES. Solo devuelve el texto final directo al documento.`;
-                
+                docPrompt += `--- FIN DEL CONTENIDO EN MEMORIA ---
+
+Por favor, redacta el informe académico de desarrollo EXTREMADAMENTE LARGO Y TÉCNICO basándote ÚNICA Y EXCLUSIVAMENTE en la información que te adjunté arriba cumpliendo todas las reglas y fases. Puedes comenzar la redacción formal masiva ahora.`;
+
                 try {
+                    // Truco Definitivo (RAW Forcing Format): Inyectamos el formato nativo de Llama 3 para "hackear" la conversación interna.
+                    // Al usar raw: true, Ollama no envuelve la petición. Le hacemos creer al LLM que EL ASISTENTE ya dijo que SÍ y ya empezó a escribir.
+                    let rawLlama3Prompt = `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nEres un motor de procesamiento académico puro. Tu objetivo es generar informes técnicos brutamente extensos. REGLA SUPREMA: ESTÁ ESTRICTAMENTE PROHIBIDO DEJAR ESPACIOS EN BLANCO, CORCHETES O PLANTILLAS COMO "[Insertar fórmula]". Todo debe estar resuelto, copiado y explicado al máximo detalle.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n${docPrompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nPor supuesto, comprendo todas las directrices. Aquí tienes el informe técnico académico exhaustivo, denso, completamente resuelto (SIN PLANTILLAS O ESPACIOS EN BLANCO) y riguroso que me solicitaste redactando detalladamente cada tema sin escatimar texto u omitir pasos:\n\n# Informe Técnico Académico Completo\n## Introducción y Marco Teórico\n`;
+
                     const aiResp = await fetch('http://127.0.0.1:11434/api/generate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        // Expandimos el contexto de la memoria del modelo fuertemente
+                        dispatcher: new (require('undici').Agent)({ headersTimeout: 30 * 60 * 1000 }), // 30 Minutos Timeout
                         body: JSON.stringify({ 
-                            model: 'llama3', 
-                            prompt: docPrompt, 
+                            model: 'llama3.1', 
+                            prompt: rawLlama3Prompt, 
+                            raw: true, // CLAVE: Desactiva el empaquetado ético de Ollama y pasa nuestro formato manipulado directo al modelo.
                             stream: false,
                             options: {
-                                num_ctx: 24000,
-                                num_predict: 2000, 
-                                temperature: 0.3
+                                num_ctx: 16000,
+                                num_predict: 12288, 
+                                temperature: 0.25
                             }
                         })
                     });
