@@ -1,12 +1,24 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JARVIS OS</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
+
+    <!-- Librerias para mejorar la interfaz visual MD/MATH -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        .action-tool-bar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; }
+        .hud-btn { background: rgba(0, 0, 0, 0.5); border: 1px solid var(--accent); color: var(--accent); padding: 5px 15px; cursor: pointer; font-family: 'Inter'; border-radius: 4px; transition: 0.3s; display: none;}
+        .hud-btn:hover { background: var(--accent); color: #000; box-shadow: 0 0 10px var(--accent); }
+        .btn-stop { color: #ff3366; border-color: #ff3366; }
+        .btn-stop:hover { background: #ff3366; color: #fff; box-shadow: 0 0 10px #ff3366; }
+    </style>
 </head>
 <body>
     <div id="particles-js"></div> 
@@ -18,7 +30,7 @@
                 <i class="fa-solid fa-microchip"></i> JARVIS <span>OS</span>
             </div>
             <div style="display: flex; align-items: center; gap: 15px;">
-                <select id="voice-select" style="background: transparent; color: #00ffcc; border: 1px solid rgba(0,255,204,0.3); border-radius: 4px; padding: 2px 5px; font-family: 'Rajdhani'; outline: none; cursor: pointer; max-width: 180px; text-overflow: ellipsis; font-size: 0.9em;">
+                <select id="voice-select" class="voice-select-box">
                     <option value="">Cargando voces...</option>
                 </select>
                 <div class="system-status">
@@ -34,7 +46,7 @@
             <aside class="side-panel modes-panel">
                 <h3><i class="fa-solid fa-layer-group"></i> Modos de Operación</h3>
                 <ul id="modes-list" class="mode-list">
-                    <!-- Dinámico -->
+                    <!-- DinÃ¡mico -->
                 </ul>
                 <button id="btn-open-mode-modal" class="action-btn mt-10">
                     <i class="fa-solid fa-plus"></i> Crear Nuevo Modo
@@ -52,33 +64,39 @@
                     </div>
                 </div>
 
-                <div class="transcript-box">
+                <div class="transcript-box" >
                     <div id="user-transcript" class="user-text">Esperando interacción...</div>
                     <div id="jarvis-response" class="jarvis-text">Sistema Jarvis. Inicia el sistema para interactuar.</div>
+                    
+                    <div class="action-tool-bar">
+                        <button id="btn-stop-audio" class="hud-btn btn-stop"><i class="fa-solid fa-volume-xmark"></i> Detener Audio</button>
+                    </div>
                 </div>
 
                 <!-- PANEL DE ARCHIVOS Y LINKS (NUEVO) -->
-                <div class="context-input-container">
-                    <div class="context-group">
-                        <i class="fa-solid fa-link"></i>
-                        <input type="url" id="context-url" placeholder="Pegar URL web aquí para extraer texto...">
+                <div class="controls-wrapper">
+                    <div class="context-input-container">
+                        <div class="context-group">
+                            <i class="fa-solid fa-link"></i>
+                            <input type="url" id="context-url" placeholder="Pegar URL web aquí para extraer texto...">
+                        </div>
+                        <div class="context-group file-dropzone" id="dropzone" title="Arrastra tu(s) PDF(s) aquí o haz clic para subir">
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                            <span id="dropzone-text">Arrastra múltiples archivos aquí (.pdf) o haz clic</span>
+                            <input type="file" id="context-file" accept=".pdf,.txt,.docx" style="display:none" multiple>
+                            <input type="hidden" id="context-file-path">
+                        </div>
+                        <div class="context-group input-text">
+                            <input type="text" id="manual-text-input" placeholder="O escribe tu comando textualmente aquí y presiona Enter..." autocomplete="off">
+                            <button id="btn-send-text"><i class="fa-solid fa-paper-plane"></i></button>
+                        </div>
                     </div>
-                    <div class="context-group file-dropzone" id="dropzone" title="Arrastra tu(s) PDF(s) aquí o haz clic para subir">
-                        <i class="fa-solid fa-cloud-arrow-up"></i>
-                        <span id="dropzone-text">Arrastra múltiples archivos aquí (.pdf) o haz clic</span>
-                        <input type="file" id="context-file" accept=".pdf,.txt,.docx" style="display:none" multiple>
-                        <input type="hidden" id="context-file-path">
-                    </div>
-                    <div class="context-group input-text">
-                        <input type="text" id="manual-text-input" placeholder="O escribe tu comando textualmente aquí y presiona Enter..." autocomplete="off">
-                        <button id="btn-send-text"><i class="fa-solid fa-paper-plane"></i></button>
-                    </div>
-                </div>
 
-                <div class="controls">
-                    <button id="btn-toggle-mic" class="power-btn">
-                        <i class="fa-solid fa-microphone"></i> MANTÉN PRESIONADO PARA HABLAR
-                    </button>
+                    <div class="controls">
+                        <button id="btn-toggle-mic" class="power-btn">
+                            <i class="fa-solid fa-microphone"></i> MANTÉN PRESIONADO PARA HABLAR
+                        </button>
+                    </div>
                 </div>
 
             </section>
@@ -109,3 +127,8 @@
     <script src="app.js"></script>
 </body>
 </html>
+
+
+
+
+

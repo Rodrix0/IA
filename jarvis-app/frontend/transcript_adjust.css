@@ -1,0 +1,72 @@
+﻿.center-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 20px 40px;
+    position: relative;
+    overflow: hidden;
+}
+
+.visualizer-container {
+    height: 180px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    position: relative;
+    transform: scale(0.85); /* Slightly smaller to fit UI */
+}
+
+.transcript-box {
+    width: 100%;
+    max-width: 800px;
+    background: var(--glass-highlight);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    animation: fadeIn 0.5s ease forwards;
+}
+
+.jarvis-text {
+    color: var(--text-primary);
+    font-size: 1.125rem;
+    font-weight: 400;
+    line-height: 1.6;
+    width: 100%;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    padding-right: 12px;
+    padding-bottom: 12px;
+    text-align: left;
+}
+
+.context-input-container {
+    width: 100%;
+    max-width: 800px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    background: var(--bg-solid-panel);
+    border: 1px solid var(--border-soft);
+    border-radius: 50px;
+    padding: 8px 16px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    align-items: center;
+    transition: all 0.2s ease;
+    margin-bottom: 12px;
+}
+
+.controls {
+    flex-shrink: 0;
+    margin-bottom: 10px;
+}
