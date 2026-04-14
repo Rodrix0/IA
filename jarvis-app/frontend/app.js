@@ -47,6 +47,7 @@ if (SpeechRecognition) {
 
         userBox.textContent = `"${transcript}"`;
         jarvisBox.textContent = "Analizando memoria y directivas...";
+        hideUXButtons();
         setRingState('idle');
         
         const urlContext = document.getElementById('context-url').value.trim();
@@ -116,8 +117,20 @@ function speak(text, callback) {
 
     isJarvisSpeaking = true;
     setRingState('speaking');
-    jarvisBox.textContent = text;
+    
+    // Mejorar representación visual y accesibilidad
+    if (typeof marked !== 'undefined') {
+        jarvisBox.innerHTML = marked.parse(text);
+        if (window.MathJax) MathJax.typesetPromise([jarvisBox]);
+    } else {
+        jarvisBox.textContent = text;
+    }
+    
     userBox.textContent = "..."; 
+    
+    // Muestra los botones de UX
+    
+    document.getElementById('btn-stop-audio').style.display = 'block';
 
     if (recognition && isSystemActive) {
         try { recognition.abort(); } catch(e){}
@@ -247,6 +260,7 @@ function startSystem(e) {
     btnToggleMic.innerHTML = '<i class="fa-solid fa-microphone"></i> ESCUCHANDO...';
     btnToggleMic.classList.add('active');
     jarvisBox.textContent = "Te escucho, dime...";
+    hideUXButtons();
     setRingState('listening');
     
     try {
@@ -261,6 +275,7 @@ function stopSystem(e) {
     btnToggleMic.innerHTML = '<i class="fa-solid fa-microphone"></i> MANTÉN PRESIONADO PARA HABLAR';
     btnToggleMic.classList.remove('active');
     jarvisBox.textContent = "Procesando orden...";
+    hideUXButtons();
     setRingState('idle');
     
     try {
@@ -406,3 +421,19 @@ function uploadFile(file) {
 
 
 
+
+const btnStop = document.getElementById('btn-stop-audio');
+
+
+
+if (btnStop) {
+    btnStop.addEventListener('click', () => {
+        window.speechSynthesis.cancel();
+        isJarvisSpeaking = false;
+        if(isSystemActive) { setRingState('idle'); }
+        btnStop.innerHTML = '<i class="fa-solid fa-check"></i> Silenciado';
+        setTimeout(() => btnStop.innerHTML = '<i class="fa-solid fa-volume-xmark"></i> Detener Audio', 2500);
+    });
+}
+
+function hideUXButtons() { const b2 = document.getElementById('btn-stop-audio'); if(b2) b2.style.display = 'none'; }
