@@ -80,34 +80,66 @@ if (SpeechRecognition) {
 }
 
 // --- Text to Speech Setup ---
+// --- Menu de Voces ---
+function populateVoices() {
+    const select = document.getElementById('voice-select');
+    if (!select) return;
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0) return;
+    const currentVal = select.value;
+    select.innerHTML = '';
+    let foundDefault = false;
+    voices.forEach((voice, index) => {
+        const option = document.createElement('option');
+        option.textContent = `${voice.name} (${voice.lang})`;
+        option.value = index;
+        if (voice.name.includes("Google español") || voice.name.includes("Microsoft Helena")) {
+            if(!currentVal) { option.selected = true; foundDefault = true; }
+        }
+        select.appendChild(option);
+    });
+    if(currentVal) select.value = currentVal;
+}
+
+window.speechSynthesis.onvoiceschanged = () => {
+    populateVoices();
+};
+window.addEventListener('load', () => populateVoices());
+
 function speak(text, callback) {
     if (!window.speechSynthesis) {
         console.warn("SpeechSynthesis no soportado");
         return;
     }
 
-    window.speechSynthesis.cancel(); // Cancelar audios previos
+    window.speechSynthesis.cancel();
 
     isJarvisSpeaking = true;
     setRingState('speaking');
     jarvisBox.textContent = text;
     userBox.textContent = "..."; 
 
-    // Fuerza a abortar el reconocimiento de voz para que no escuche el parlante
     if (recognition && isSystemActive) {
         try { recognition.abort(); } catch(e){}
     }
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'es-ES';
-    utterance.rate = 1.15; // Un poco más rápido para estilo AI
+    utterance.rate = 1.15;
     utterance.pitch = 1.0;
 
-    // Buscar una voz de Google que suene bien (opcional)
     const voices = window.speechSynthesis.getVoices();
-    const googleVoice = voices.find(v => v.name.includes("Google español") || v.lang.includes('es-'));
-    if (googleVoice) {
-        utterance.voice = googleVoice;
+    const select = document.getElementById('voice-select');
+    let selectedVoice = null;
+    
+    if (select && select.value !== "" && voices.length > 0) {
+        selectedVoice = voices[select.value];
+    } else {
+        selectedVoice = voices.find(v => v.name.includes("Google español") || v.lang.includes('es-'));
+    }
+
+    if (selectedVoice) {
+        utterance.voice = selectedVoice;
     }
 
     utterance.onend = () => {
@@ -132,9 +164,8 @@ function speak(text, callback) {
 }
 
 // Ensure voices are loaded (Chrome things)
-window.speechSynthesis.onvoiceschanged = () => {
-    window.speechSynthesis.getVoices();
-};
+
+
 
 // --- Socket Events Logic ---
 socket.on('init_data', (data) => {
