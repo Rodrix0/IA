@@ -13,6 +13,7 @@ const observerService = require('./services/observerService');
 const appDiscoveryService = require('./services/appDiscoveryService');
 const hotkeyService = require('./services/hotkeyService');
 const reminderService = require('./services/reminderService');
+const powerService = require('./services/powerService');
 
 const app = express();
 const server = http.createServer(app);
@@ -115,6 +116,47 @@ io.on('connection', (socket) => {
                 responseText = "Mostrando los modos disponibles de mi sistema.";
                 action = "SHOW_MODES";
             }
+            else if (lowerText.includes('entrenar seguridad') || lowerText.includes('configurar seguridad') || lowerText.includes('entrenar biometría')) {
+                const { spawn } = require('child_process');
+                // Buscamos un PIN dictado, o usamos 0000 por defecto
+                let pinMatches = lowerText.match(/\d{4}/);
+                let selectedPin = pinMatches ? pinMatches[0] : "0000";
+                
+                const pythonExe = require('path').join(__dirname, '..', 'python_engine', 'venv', 'Scripts', 'python.exe');
+                const lockScript = require('path').join(__dirname, '..', 'python_engine', 'register_face.py');
+                spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', pythonExe, lockScript, selectedPin], { detached: true });
+                
+                // Forzamos la activacion en el JSON
+                const fs = require('fs');
+                const secPath = require('path').join(__dirname, 'data', 'security.json');
+                let sec = {"pin": selectedPin, "enabled": true};
+                fs.writeFileSync(secPath, JSON.stringify(sec, null, 4));
+
+                responseText = `Iniciando proceso de entrenamiento biométrico en una ventana externa. Tu PIN temporal de respaldo es ${selectedPin}. Por favor, sigue las instrucciones en pantalla. El escudo quedará activado al finalizar.`;
+            }
+            else if (/(apagar|desactivar|quitar|remover|apaga|desactiva|quita)( el| la)? (seguridad|escudo|biometría|bloqueo)/.test(lowerText)) {
+                const fs = require('fs');
+                const secPath = require('path').join(__dirname, 'data', 'security.json');
+                if (fs.existsSync(secPath)) {
+                    let sec = JSON.parse(fs.readFileSync(secPath));
+                    sec.enabled = false;
+                    fs.writeFileSync(secPath, JSON.stringify(sec, null, 4));
+                }
+                responseText = "Escudo biométrico de Windows desactivado. Tu computadora no será bloqueada al entrar en suspensión.";
+                action = "SECURITY_DISABLED";
+            }
+            else if (/(encender|activar|poner|habilitar|prender|enciende|activa|pon|prende)( el| la)? (seguridad|escudo|biometría|bloqueo)/.test(lowerText)) {
+                const fs = require('fs');
+                const secPath = require('path').join(__dirname, 'data', 'security.json');
+                let sec = {"pin": "0000", "enabled": true};
+                if (fs.existsSync(secPath)) {
+                    sec = JSON.parse(fs.readFileSync(secPath));
+                    sec.enabled = true;
+                }
+                fs.writeFileSync(secPath, JSON.stringify(sec, null, 4));
+                responseText = "Escudo Biométrico encendido y armado. Defenderé tu sistema en cuanto lo ordenes.";
+                action = "SECURITY_ENABLED";
+            }
             else if (lowerText.includes('activar modo')) {
                 const modeNameMatch = lowerText.replace('activar modo', '').replace('el', '').trim();
                 const modes = modeService.getAllModes();
@@ -195,4 +237,6 @@ server.listen(PORT, () => {
     hotkeyService.initHotkeyService(io);
     // Iniciar modulo Cronos para tareas y recordatorios
     reminderService.startScheduler(io);
+    // Iniciar escucha de eventos de energia OS (Para Lockscreen)
+    powerService.initPowerListener();
 });
