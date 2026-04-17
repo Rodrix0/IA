@@ -3,40 +3,7 @@ const cheerio = require('cheerio');
 // Eliminamos las credenciales de Google porque ahora somos 100% locales
 let conversationHistory = [];
 
-function extractRecipientFromCurrentUtterance(text) {
-    if (!text || typeof text !== 'string') return '';
-
-    const cleaned = text
-        .trim()
-        .replace(/["'`´]+/g, '')
-        .replace(/[\u0000-\u001F]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .replace(/[.!,;:?]+$/g, '');
-
-    // Casos: "manda ... a analistas", "envía ... para analistas"
-    const m = cleaned.match(/\b(?:manda(?:r)?|env[ií]a(?:r)?|m[aá]ndale|env[ií]ale?)\b[\s\S]*?\b(?:a|para)\s+([a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ][a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ\s._-]{1,80})$/i);
-    if (!m || !m[1]) return '';
-
-    let recipient = m[1].trim();
-    recipient = recipient
-        .replace(/\b(?:por favor|gracias|porfa|ahora|ya)\b/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    return recipient;
-}
-
-function getLastAssistantReplyFromHistory() {
-    for (let i = conversationHistory.length - 1; i >= 0; i--) {
-        const msg = conversationHistory[i];
-        if (msg.role !== 'assistant') continue;
-        if (typeof msg.content === 'string' && msg.content.trim()) return msg.content.trim();
-        if (msg.content && typeof msg.content.reply === 'string' && msg.content.reply.trim()) {
-            return msg.content.reply.trim();
-        }
-    }
-    return '';
-}
+// Funciones legacy limpiadas porque ahora usamos Native Tool Calling a través del LLM.
 
 function recoverIntentFromBrokenJson(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
@@ -80,9 +47,9 @@ function recoverIntentFromBrokenJson(rawText) {
 }
 
 async function performInvisibleSearch(query, maxLength = 3000) {
-    console.log(`\n[Agente Araña] 🕸️ Infiltrando motor de búsqueda secundario (Yahoo) para: "${query}"...`);
+    console.log(`\n[Agente Araña] 🕸️ Infiltrando motor de búsqueda (DuckDuckGo) para: "${query}"...`);
     try {
-        const response = await fetch(`https://es.search.yahoo.com/search?p=${encodeURIComponent(query)}`, {
+        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
@@ -91,11 +58,9 @@ async function performInvisibleSearch(query, maxLength = 3000) {
         const html = await response.text();
         const $ = cheerio.load(html);
         
-        // Arrancamos estilos y scripts para dejar solo texto legible
         $('script, style, noscript, header, footer, svg, img, button').remove();
         
-        // Extraemos el texto de Yahoo (Los cuadros mágicos de Yahoo se renderizan sin bloqueos de Cookies)
-        let scrapedText = $('#main').text() || $('body').text();
+        let scrapedText = $('.result__snippet').text() || $('body').text();
         scrapedText = scrapedText.replace(/\s+/g, ' ').trim();
         
         // Le pasamos los caracteres especificados a Llama 3
@@ -113,16 +78,25 @@ async function performInvisibleSearch(query, maxLength = 3000) {
     }
 }
 
-async function fetchOllamaResponse(prompt) {
-    const response = await fetch('http://127.0.0.1:11434/api/generate', {
+async function executeLlamaChat(messages, tools = null, jsonFormat = false) {
+    const payload = {
+        model: 'llama3.1', // Cambiado a 3.1 para soportar las tools nativas de Ollama
+        messages: messages,
+        stream: false
+    };
+    
+    if (tools) {
+        payload.tools = tools;
+    }
+    
+    if (jsonFormat) {
+        payload.format = "json";
+    }
+
+    const response = await fetch('http://127.0.0.1:11434/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: 'llama3', 
-            prompt: prompt,
-            stream: false,
-            format: 'json' // Obligamos a Ollama a responder en formato JSON!
-        })
+        body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
@@ -130,16 +104,19 @@ async function fetchOllamaResponse(prompt) {
     }
 
     const data = await response.json();
+    return data.message;
+}
+
+// Mantenemos esto como un wrapper para las llamadas legacy (buscar clima en internet, etc)
+async function fetchOllamaResponse(prompt) {
+    const msgs = [{ role: "user", content: prompt }];
     try {
-        return JSON.parse(data.response); // Parseamos el JSON que nos dio Ollama
+        const aiMsg = await executeLlamaChat(msgs, null, true); // true for json
+        return JSON.parse(aiMsg.content);
     } catch (e) {
-        console.error("Error parseando respuesta JSON de Ollama:", data.response);
-        const recovered = recoverIntentFromBrokenJson(data.response);
-        if (recovered) {
-            console.warn("[Parser Tolerante] Se recuperó una respuesta utilizable desde JSON inválido.");
-            return recovered;
-        }
-        return {
+        console.error("Error parseando respuesta JSON de Ollama (Legacy wrapper):", e);
+        const recovered = recoverIntentFromBrokenJson(""); 
+        return recovered || {
             action: "chat",
             reply: "No pude estructurar la respuesta en JSON, pero sigo operativo. Repite tu pedido y lo intento de nuevo."
         };
@@ -148,81 +125,105 @@ async function fetchOllamaResponse(prompt) {
 
 async function getAIResponse(userText, activeMode, screenContext = null) {
     try {
-        let fullPrompt = "INSTRUCCIONES DEL SISTEMA BASE:\n" + activeMode.prompt + "\n";
-        fullPrompt += "Estás actuando como el cerebro de un Asistente Virtual Híbrido.\n";
-        fullPrompt += "=== REGLA DE SUPERVIVENCIA ABSOLUTA ===\n";
-        fullPrompt += "Tu ÚNICA salida debe ser un objeto JSON válido con la siguiente estructura y NADA MÁS:\n";
-        fullPrompt += "{\n  \"action\": \"Una de las siguientes opciones: send_whatsapp, send_email, search_web, open_app, command, schedule_task, check_reminders, clear_reminders, generate_prompt, create_document, chat\",\n";
-        fullPrompt += "  \"target\": \"A quién o a qué se dirige la acción (ej: 'informe sobre la ingeniería de sistemas')\",\n";
-        fullPrompt += "  \"message\": \"El mensaje o contenido de la acción (si aplica)\",\n";
-        fullPrompt += "  \"time\": \"Opcional. SOLO si action es 'schedule_task', pon aquí la hora en formato HH:MM (ej: '14:00')\",\n";
-        fullPrompt += "  \"action_type\": \"Opcional. Si action es 'schedule_task' (ej: 'send_whatsapp'). Si action es 'create_document', pon el formato (ej: 'doc', 'excel', 'ppt')\",\n";
-        fullPrompt += "  \"reply\": \"Lo que le vas a decir al usuario por voz (siempre en español, amigable y corto)\" \n}\n\n";
-        fullPrompt += "Si el usuario TE PIDE CREAR UN INFORME, DOCUMENTO, WORD, EXCEL O PRESENTACIÓN (POWERPOINT) (ej: 'hazme un informe con normas apa sobre ingeniería basándote en este link'), usa 'action': 'create_document'. En 'target' pon el tema y en 'action_type' pon el formato ('doc', 'excel', 'ppt', 'pdf'). IMPORTANTE: Si el usuario te pasa un enlace web (http...) o la ruta de un PDF (.pdf), guárdalo EXACTAMENTE en la propiedad 'message'. Si el usuario te pide que busques la información en Google/Internet por él (ej: 'crea un doc sobre automata buscando en google'), escribe la palabra exacta 'search_web' dentro de 'message'. Si no pide buscar en internet ni te da un archivo, déjala vacía.\n";
-        fullPrompt += "Si el usuario TE PIDE CREAR UN PROMPT DETALLADO o FABRICAR UN PROMPT o diseñar una estructura de proyecto/código para abrir en VS Code (ej: 'creá un prompt detallado sobre una página web de turnos'), usa 'action': 'generate_prompt' y en 'target' pon la temática (ej: 'página web de turnos').\n";
-        fullPrompt += "Si la petición requiere ejecutar una acción en Python o el Sistema, coloca 'reply' confirmándolo (ej: 'Abriendo Spotify...', 'Enviando mensaje...') y usa la 'action' correcta.\n";
-        fullPrompt += "Si el usuario TE PIDE QUE PROGRAMES UNA TAREA A UNA HORA o que mandes un mensaje LUEGO / MÁS TARDE en una hora específica (ej: 'mándale un mensaje a ma a las 14:00'), usa 'action': 'schedule_task'. Llena 'target' con la persona o cosa, 'message' con lo que hay que enviar o decir, 'action_type' con la acción real ('send_whatsapp' o 'speak' o 'open_app'), y 'time' con la hora 'HH:MM'.\n";
-        fullPrompt += "Si el usuario pregunta QUÉ TIENE QUE HACER, o SUS TAREAS / RECORDATORIOS (ej: 'qué tengo para hacer hoy', 'revisá mis recordatorios', 'fijate en mi app'), usa la acción 'check_reminders'. Tu 'reply' debe confirmar que lo revisarás.\n";
-        fullPrompt += "Si el usuario TE PIDE BORRAR, LIMPIAR O ELIMINAR sus alarmas o tareas locales, usa la acción 'clear_reminders'.\n";
-        fullPrompt += "Si es solo charla o conversación simple, pon 'action': 'chat' y tu respuesta en 'reply'.\n";
-        fullPrompt += "Si el usuario te hace una PREGUNTA donde TÚ debes contestarle verbalmente con información (ej: 'quién ganó el partido', 'qué es un autómata', 'cuándo juega el real'), usa 'search_web' y pon el conocimiento a buscar en 'target'.\n";
-        fullPrompt += "Si el usuario te pide ABRIR, BUSCAR o PONER algo dentro de una aplicación web para que ÉL lo vea (ej: 'abrir chat gpt y buscar conejos', 'abre youtube y pon la cobra', 'busca motos en google'), debes usar 'open_app'. IMPORTANTE: En el 'target', incluye el nombre de la app junto con lo que quiere buscar (ej: 'chat gpt buscar conejos', 'youtube la cobra', 'google comprar motos'). NUNCA uses 'search_web' si el usuario te está pidiendo que abras la página.\n";
-        fullPrompt += "Si es simplemente abrir un juego o app nativa limpia (ej: 'abrime el lol', 'iniciá el lol', 'poné el netflix'), usa 'open_app' y pon ÚNICAMENTE el nombre limpio en 'target' sin verbos.\n";
-        fullPrompt += "Si es mandar WhatsApp o correo, usa 'send_whatsapp' o 'send_email', pon exactamente EL NOMBRE DEL CONTACTO (el que escuchas, con sus nombres, apellidos o emojis fonéticos) en 'target' y EL TEXTO A ENVIAR en 'message'.\n";
-        fullPrompt += "Si el usuario dice 'manda eso', 'con esa información', 'con esa info', 'envía lo anterior' o similares, entonces en 'message' debes copiar literalmente la ÚLTIMA respuesta que tú le diste en la conversación (no inventar ni resumir).\n";
-        fullPrompt += "Para WhatsApp, es VITAL que resuelvas el target tal cual lo dice el usuario. Ejemplo: si dice 'enviale a los pibes nashe', tu target DEBE ser 'los pibes nashe'.\n";
-        fullPrompt += "REGLA DE ORTOGRAFÍA EN NOMBRES: Si el usuario te aclara cómo se escribe el nombre (ej: 'gabi con i latina', 'gaby con i griega', 'con s', 'con z'), APLICA esa conversión ortográfica tú mismo en el 'target' (ej: 'gaby' o 'gabi') pero NUNCA incluyas la frase de aclaración adentro del target final.\n";
-        fullPrompt += "Importante: NUNCA dejes 'reply' vacío, SIEMPRE comunícate confirmando o respondiendo al usuario en esa propiedad.\n";
-        fullPrompt += "¡NO ESCRIBAS TEXTO FUERA DEL JSON!\n=====================================\n\n";
+        let systemPrompt = "INSTRUCCIONES DEL SISTEMA BASE:\n" + activeMode.prompt + "\n";
+        systemPrompt += "Eres Jarvis, el asistente de PC. Tienes herramientas de automatización y de auto-aprendizaje (Code-Act).\n";
+        systemPrompt += "REGLA DE VIDA O MUERTE: Si el usuario te hace charla casual, te pregunta qué sabes hacer, cómo estás, o cualquier pregunta general sobre ti mismo, ESTÁ EXTRICTAMENTE PROHIBIDO (PENADO) USAR UNA HERRAMIENTA. Responde únicamente chateando de forma natural.\n";
+        systemPrompt += "REGLA DE WHATSAPP: El destinatario debe ser el nombre del contacto limpio. Si te piden enviar algo que acabas de explicar o buscar (información anterior), usa tu memoria para escribir toda esa info completa en el campo 'message'.\n";
         
+        const dateNow = new Date();
+        systemPrompt += `\nFECHA Y HORA ACTUAL DEL SISTEMA: ${dateNow.toLocaleString('es-AR')}. Usa esta información exacta si el usuario pregunta la hora o el día. Si el usuario pregunta la hora de otro país, calcúlala usando tu propio conocimiento horario.\n\n`;
+
         if (screenContext) {
-            fullPrompt += "CONTEXTO VISUAL ACTUAL: " + screenContext + "\n\n";
+            systemPrompt += "CONTEXTO VISUAL ACTUAL: " + screenContext + "\n\n";
         }
+
+        let messages = [ { role: "system", content: systemPrompt } ];
 
         if (conversationHistory.length > 0) {
-            fullPrompt += "HISTORIAL DE CONVERSACIÓN RECIENTE:\n";
             conversationHistory.forEach(msg => {
-                // Al historial le damos formato de texto normal, NO en JSON, para que no se confunda
-                let contentText = msg.content.reply || msg.content;
-                fullPrompt += (msg.role === 'user' ? "Usuario: " : "Jarvis: ") + contentText + "\n";
+                let contentText = typeof msg.content === 'object' 
+                    ? (typeof msg.content.reply === 'string' ? msg.content.reply : JSON.stringify(msg.content.reply || msg.content)) 
+                    : String(msg.content);
+                messages.push({ role: msg.role, content: contentText });
             });
-            fullPrompt += "\n";
         }
 
-        fullPrompt += "=====================================\n";
-        fullPrompt += "Usuario (Último y más importante comando): " + userText + "\n";
-        fullPrompt += "Responde generando un JSON a partir de esta ÚLTIMA acción:\n";
+        messages.push({ role: "user", content: userText });
 
-        // Obtenemos la decisión directa como objeto JSON
-        let intent = await fetchOllamaResponse(fullPrompt);
+        const tools = [
+            { type: "function", function: { name: "send_whatsapp", description: "Envía un mensaje de WhatsApp a un contacto.", parameters: { type: "object", properties: { target: { type: "string", description: "El nombre exacto del contacto (ej. gabi, mama)" }, message: { type: "string", description: "El contenido exacto a enviar. IMPORTANTE: Si el usuario te pide enviar 'esa info' o 'lo anterior', OBLIGATORIAMENTE debes buscar la informacion detallada en el historial y pegarla aquí COMPLETA." }, reply: { type: "string", description: "Lo que dirás en voz alta" } }, required: ["target", "message", "reply"] } } },
+            { type: "function", function: { name: "send_email", description: "Envía un correo electrónico.", parameters: { type: "object", properties: { target: { type: "string", description: "Nombre o dirección" }, message: { type: "string", description: "El contenido exacto a enviar (reemplaza 'esta info' por la data real del historial)." }, reply: { type: "string", description: "Respuesta hablada" } }, required: ["target", "message", "reply"] } } },
+            { type: "function", function: { name: "search_web", description: "Busca en internet datos fácticos (clima, clima local, biografías, significado de palabras, resultados deportivos). NUNCA LO USES PARA CONSULTAR LA HORA NI EL DÍA, JAMÁS (usa tu sistema horario local para eso).", parameters: { type: "object", properties: { target: { type: "string", description: "La consulta a buscar en google" } }, required: ["target"] } } },
+            { type: "function", function: { name: "open_app", description: "Abre una aplicación web o instalada en la PC (Netflix, LOL, Youtube, Spotify, chat gpt).", parameters: { type: "object", properties: { target: { type: "string", description: "Nombre de la app limpia (ej: 'netflix', 'youtube la cobra')" }, reply: { type: "string", description: "Respuesta hablada confirmando" } }, required: ["target", "reply"] } } },
+            { type: "function", function: { name: "schedule_task", description: "Programa una tarea futura a una hora indicada.", parameters: { type: "object", properties: { time: { type: "string", description: "Hora en formato HH:MM (ej. 14:00)" }, action_type: { type: "string", description: "'send_whatsapp', 'speak', o 'open_app'" }, target: { type: "string", description: "A quién va dirigido" }, message: { type: "string", description: "El mensaje a enviar/decir" }, reply: { type: "string", description: "Confirmación en voz alta" } }, required: ["time", "action_type", "reply"] } } },
+            { type: "function", function: { name: "check_reminders", description: "Revisa las tareas a realizar o recordatorios activos hoy.", parameters: { type: "object", properties: { reply: { type: "string", description: "Frase de confirmación de que vas a buscar la info" } }, required: ["reply"] } } },
+            { type: "function", function: { name: "clear_reminders", description: "Limpia y borra todas las alarmas o tareas programadas.", parameters: { type: "object", properties: { reply: { type: "string", description: "Frase confirmando borrado" } }, required: ["reply"] } } },
+            { type: "function", function: { name: "create_document", description: "Genera un informe, Word, Excel, PowerPoint o PDF ultra detallado basandote en links o temas. NO lo uses si piden un prompt o un codigo de software.", parameters: { type: "object", properties: { target: { type: "string", description: "Tema del documento" }, action_type: { type: "string", enum: ["doc", "excel", "ppt", "pdf"], description: "Formato" }, message: { type: "string", description: "Fuentes: URLs o 'search_web'" }, reply: { type: "string", description: "Respuesta hablada" } }, required: ["target", "action_type", "reply"] } } },
+            { type: "function", function: { name: "generate_prompt", description: "MÁS IMPORTANTE: NUNCA USES ESTO SI EL USUARIO CHARLA O PREGUNTA QUÉ PUEDES HACER. Genera una arquitectura extensa de sistema. USAR SOLO SÍ PIDEN 'crear prompt de software'.", parameters: { type: "object", properties: { target: { type: "string", description: "La temática" }, reply: { type: "string", description: "Respuesta hablada" } }, required: ["target", "reply"] } } },
+            { type: "function", function: { name: "develop_new_skill", description: "CREA SCRIPTS DE PYTHON INTERNOS. ÚSALA SÓLO si el usuario usa las palabras mágicas 'aprende al...', 'quiero que aprendas a...', o 'escribe un script para mi sistema que...'. Te sirve para aprender a hacer tareas de PC que no sabes (ej: 'Aprende a apagar la pc', 'Aprende a sumar dados').", parameters: { type: "object", properties: { target: { type: "string", description: "El objetivo detallado del script que vas a programar en Python para cumplir la habilidad" }, reply: { type: "string", description: "Lo que le dirás repitiendo su orden (ej: 'Comenzando a desarrollar habilidad para bla bla')" } }, required: ["target", "reply"] } } },
+            { type: "function", function: { name: "chat_casual", description: "Obligatorio: USAR ESTA HERRAMIENTA SIEMPRE QUE EL USUARIO HAGA CHARLA CASUAL, PREGUNTE LA HORA, EL DÍA, O PIDA TUS CAPACIDADES. Evita errores usando esto.", parameters: { type: "object", properties: { reply: { type: "string", description: "Respuesta conversacional natural al usuario calculada usando tu propio cerebro" } }, required: ["reply"] } } }
+        ];
 
-        // Fallback determinístico del destinatario según frase ACTUAL del usuario.
-        const recipientFromCurrentUtterance = extractRecipientFromCurrentUtterance(userText);
-        if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && recipientFromCurrentUtterance) {
-            intent.target = recipientFromCurrentUtterance;
-        }
-
-        // Fallback determinístico: si el usuario pide enviar "esa info", tomamos la última respuesta del asistente.
-        const asksPreviousInfo = /\b(con\s+esa\s+info(?:rmaci[oó]n)?|manda\s+eso|env[ií]a\s+eso|env[ií]a\s+lo\s+anterior|manda\s+lo\s+anterior|esa\s+informaci[oó]n|esa\s+info)\b/i.test(userText);
-        if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && asksPreviousInfo) {
-            const lastReply = getLastAssistantReplyFromHistory();
-            if (lastReply) {
-                intent.message = lastReply;
+        try {
+            const pythonSkillsRes = await fetch('http://127.0.0.1:8000/list_skills');
+            if (pythonSkillsRes.ok) {
+                const pythonSkills = await pythonSkillsRes.json();
+                pythonSkills.forEach(skill => {
+                    tools.push({
+                        type: "function",
+                        function: {
+                            name: skill.name,
+                            description: skill.description,
+                            parameters: skill.parameters
+                        }
+                    });
+                });
             }
+        } catch (e) {
+            console.error("[Code-Act] No se pudieron cargar habilidades dinámicas de Python:", e.message);
         }
+
+        let llamaResponse = await executeLlamaChat(messages, tools, false);
+        
+        // Emulamos el intent structure legacy para no quebrar el resto del código
+        let intent = {
+            action: "chat",
+            target: "",
+            message: "",
+            time: "",
+            action_type: "",
+            reply: ""
+        };
+
+        if (llamaResponse.tool_calls && llamaResponse.tool_calls.length > 0) {
+            const tool = llamaResponse.tool_calls[0].function;
+            intent.action = tool.name;
+            const args = tool.arguments || {};
+            intent.target = args.target || "";
+            intent.message = args.message || "";
+            intent.time = args.time || "";
+            intent.action_type = args.action_type || "";
+            intent.reply = typeof args.reply === 'string' ? args.reply : (args.reply ? JSON.stringify(args.reply) : "Procediendo con la acción.");
+        } else {
+            intent.reply = typeof llamaResponse.content === 'string' ? llamaResponse.content : (llamaResponse.content ? JSON.stringify(llamaResponse.content) : "Entendido.");
+        }
+
+        // Eliminar fallback de recipient determinístico para dejar que Tool Calling de Llama 3.1 se encargue 100% de parsear el contacto y el mensaje exacto.
 
         // Si pide búsqueda y el motor principal prefiere que lo procesemos:
         if (intent.action === "search_web") {
             const searchResults = await performInvisibleSearch(intent.target || userText);
 
-            const secondPrompt = `El usuario preguntó: "${userText}".\nResultados de web:\n${searchResults}\n\nResponde EXCLUSIVAMENTE con un JSON válido (sin texto extra) con esta forma:\n{\n  "action": "chat",\n  "reply": "respuesta en español"\n}\nAsegúrate de escapar comillas internas dentro de reply.`;
+            const secondPrompt = `El usuario preguntó: "${userText}".\nResultados de web:\n${searchResults}\n\nResponde como un asistente virtual amigable. Genera ÚNICAMENTE lo que debo decir en voz alta para responder la pregunta, basándote en esos resultados web. SIN formato JSON. Nunca digas que la info es parcial, da lo mejor con lo que hay.`;
             
-            console.log(`[Agente Araña] 🧠 Procesando información y emitiendo JSON final...`);
-            intent = await fetchOllamaResponse(secondPrompt);
+            console.log(`[Agente Araña] 🧠 Procesando resultados y emitiendo respuesta hablada...`);
+            const subMsgs = [{ role: "user", content: secondPrompt }];
+            const aiMsg = await executeLlamaChat(subMsgs, null, false);
+            intent.reply = aiMsg.content;
         }
 
         // Ejecutar Actions de Python o Node.js:
-        if (intent.action && intent.action !== "chat" && intent.action !== "none" && intent.action !== "search_web") {
+        if (intent.action && intent.action !== "chat" && intent.action !== "chat_casual" && intent.action !== "none" && intent.action !== "search_web") {
             const sysServices = require('./systemService');
             const remServices = require('./reminderService');
             
@@ -253,19 +254,19 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                   : "No hay alarmas locales programadas.";
                 
                 const secondPrompt = `El usuario te pregunta qué cosas tiene para hacer.
-                \nSTATUS LOCAL:
-                \n${memoryStr}
-                \nTAREAS OBTENIDAS DESDE SU BASE DE DATOS EXTERNA (SUPABASE): 
-                \n${textoNube}
-                \n\nDevuelve un JSON con 'action': 'chat'. En el 'reply', actúa como un asistente elegante y resúmele TODO lo que tiene por hacer, juntando la data local y la externa si aplica. Si dice que faltan credenciales, explícale de forma amigable que debe configurarme el .env con los datos de Supabase.`;
+                \nSTATUS LOCAL:\n${memoryStr}
+                \nTAREAS DESDE SUPABASE:\n${textoNube}
+                \n\nResponde como un asistente virtual elegante. Genera ÚNICAMENTE el texto que debo decir en voz alta resumiendo TODO lo que tiene por hacer, juntando la data local y la externa si aplica. NO USES JSON, NO USES LISTAS COMPLEJAS. Contesta como si estuvieras hablando. Si faltan credenciales, explícale que configure el .env de Supabase.`;
                 
-                console.log(`[Agente Recordatorios] 🧠 Evaluando datos combinados y emitiendo JSON final...`);
-                intent = await fetchOllamaResponse(secondPrompt);
+                console.log(`[Agente Recordatorios] 🧠 Evaluando datos combinados y emitiendo resumen hablado...`);
+                const subMsgs = [{ role: "user", content: secondPrompt }];
+                const aiMsg = await executeLlamaChat(subMsgs, null, false);
+                intent.reply = aiMsg.content;
                 
                 // Actualizamos el historial interno con la deducción final para no romper la cadena
                 conversationHistory.push({ role: "user", content: userText });
                 conversationHistory.push({ role: "assistant", content: intent });
-                return intent.reply;
+                return typeof intent.reply === 'string' ? intent.reply : JSON.stringify(intent.reply);
             }
 
             // Limpieza de seguridad post-IA para nombres de WhatsApp
@@ -586,6 +587,57 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                     console.error("Error generando el prompt:", e);
                     return "Hubo un error al intentar generar el archivo de prompt.";
                 }
+            }
+
+            if (intent.action === "develop_new_skill") {
+                const objective = intent.target || intent.message || userText;
+                console.log(`[Code-Act] Enviando a Python orden de desarrollar habilidad: ${objective}`);
+                try {
+                    await fetch('http://127.0.0.1:8000/develop_skill', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ objective: objective })
+                    });
+                } catch(e) { 
+                    console.error("[Code-Act] Python inalcanzable para develop_skill", e);
+                }
+                
+                conversationHistory.push({ role: "user", content: userText });
+                conversationHistory.push({ role: "assistant", content: intent });
+                return intent.reply || "He iniciado el desarrollo de esta habilidad en segundo plano profundo.";
+            }
+
+            if (intent.action.startsWith("skill_")) {
+                console.log(`[Code-Act] Ejecutando habilidad aprendida dinámicamente: ${intent.action}`);
+                try {
+                     const kwargsObj = {};
+                     if (intent.target) kwargsObj["kwargs_str"] = typeof intent.target === 'object' ? JSON.stringify(intent.target) : String(intent.target);
+                     
+                     const reqBody = { skill_name: intent.action, kwargs: kwargsObj };
+                     const executeRes = await fetch('http://127.0.0.1:8000/execute_skill', {
+                         method: 'POST',
+                         headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify(reqBody)
+                     });
+                     
+                     if (executeRes.ok) {
+                         const execData = await executeRes.json();
+                         console.log(`[Code-Act] Habilidad ejecutada:`, execData);
+                         if (execData.status === "success") {
+                             intent.reply = `Hecho. El resultado es: ${execData.result}`;
+                         } else {
+                             intent.reply = `Lo intenté, pero la habilidad falló: ${execData.message}`;
+                         }
+                     } else {
+                         intent.reply = "La habilidad existe pero el motor Python devolvió error HTTP.";
+                     }
+                 } catch(e) {
+                     intent.reply = "No pude conectarme al motor de habilidades Python.";
+                 }
+                 
+                 conversationHistory.push({ role: "user", content: userText });
+                 conversationHistory.push({ role: "assistant", content: intent });
+                 return intent.reply;
             }
 
             if (intent.action === "open_app") {

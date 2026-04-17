@@ -72,6 +72,19 @@ app.post('/api/modes', (req, res) => {
     res.json(newMode);
 });
 
+// Endpoint para que servicios externos (Ej: Python Background Tasks) activen la voz nativa
+app.post('/api/speak', (req, res) => {
+    const { text } = req.body;
+    if (text && io) {
+        io.emit('response', { text: text, action: "REMOTE_SPEAK", actionPayload: null });
+        console.log(`[Jarvis Comunicación Externa]: ${text}`);
+        res.json({ status: "success" });
+    } else {
+        res.status(400).json({ error: "Text missing" });
+    }
+});
+
+
 // Real-time voice processing y Eventos del Socket
 io.on('connection', (socket) => {
     console.log('[+] Interfaz conectada a Jarvis (Socket ID: ' + socket.id + ')');
