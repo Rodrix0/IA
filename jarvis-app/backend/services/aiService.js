@@ -286,9 +286,11 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                 let contextText = "";
                 if (intent.message && intent.message.trim() !== "") {
                     let allChunks = [];
-                    let sourcesList = intent.message.trim().split(/\||\s+(?=http|[a-zA-Z]:\\|\/)/);
+                    // Soportamos separaciones por coma, tubería o espaciados seguidos de unidad.
+                    let sourcesList = intent.message.trim().split(/[,|]|\s+(?=http|[a-zA-Z]:\\|\/)/);
                     for (let s of sourcesList) {
-                        let source = s.trim().replace(/['"]/g, '');
+                        // Limpiar comillas, comas sueltas, espacios ocultos
+                        let source = s.trim().replace(/['",]/g, '').trim(); 
                         if (!source) continue;
                         
                         console.log(`[Jarvis RAG] 🔍 Analizando fuente en profundidad: ${source}`);
@@ -329,91 +331,101 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                         }
                     }
                     
-                    // IA de Búsqueda y Filtrado Inteligente (Evita colapsar la RAM sacando solo lo importante)
                     if(allChunks.length > 0) {
-                        console.log(`[Jarvis RAG] 🧠 Filtrando ${allChunks.length} páginas/bloques buscando lo más relevante a "${intent.target}"...`);
-                        
-                        let keywords = intent.target.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-                        if (keywords.length === 0) keywords = intent.target.toLowerCase().split(/\s+/);
-                        
-                        allChunks.forEach(chunk => {
-                            let score = 0;
-                            let lowerText = chunk.text.toLowerCase();
-                            // Puntuar qué bloques de texto mencionan lo que el usuario quiere
-                            keywords.forEach(kw => { if(lowerText.includes(kw)) score += 1; });
-                            chunk.score = score;
-                        });
-                        
-                        // 1. Agrupar chunks por fuente
-                        let chunksBySource = {};
-                        allChunks.forEach(c => {
-                            if (!chunksBySource[c.source]) chunksBySource[c.source] = [];
-                            chunksBySource[c.source].push(c);
-                        });
+                        let totalChars = allChunks.reduce((acc, c) => acc + c.text.length, 0);
+                        const charsLimit = 65000; // Capacidad nativa de 16k tokens en Llama 3 (sin truncar)
 
-                        // 2. Extraer equitativamente de TODOS los archivos (Garantizar cobertura)
-                        const charsLimit = 160000; // Límite de caracteres a 160k
-                        const sourcesArray = Object.keys(chunksBySource);
-                        if(sourcesArray.length > 0) {
-                            const charsPerSource = Math.floor(charsLimit / sourcesArray.length);
-                            sourcesArray.forEach((src, index) => {
-                                // Ordenar por relevancia dentro de cada archivo
-                                let srcChunks = chunksBySource[src].sort((a, b) => b.score - a.score);
-                                let srcTextLen = 0;
-                                let chunksAdded = 0;
-                                for (let c of srcChunks) {
-                                    if (srcTextLen > charsPerSource) break;
-                                    contextText += `\n[INICIO ARCHIVO NÚMERO ${index + 1} | Fuente Original: ${src}] \n...${c.text}...\n[FIN FRAGMENTO]\n`;
-                                    srcTextLen += c.text.length;
-                                    chunksAdded++;
+                        if (totalChars <= charsLimit) {
+                            console.log(`[Jarvis RAG] Todo el texto (${totalChars} chars) entra perfectamente en la mente de la IA. Asimilando en orden exacto...`);
+                            let currentSrc = "";
+                            allChunks.forEach((c, index) => {
+                                if (currentSrc !== c.source) {
+                                    contextText += `\n\n[--- INICIO DOCUMENTO ORIGINAL: ${c.source} ---]\n`;
+                                    currentSrc = c.source;
                                 }
-                                console.log(`[Jarvis RAG] ✅ Archivo N.º ${index + 1} ASIMILADO: Se enviaron ${srcTextLen} caracteres (de ${chunksAdded} fragmentos) desde ${src} a la IA.`);
+                                contextText += c.text + "\n";
                             });
+                        } else {
+                            console.log(`[Jarvis RAG] Texto excesivo (${totalChars} chars). Filtrando inteligentemente sin romper la cronología...`);
+                            let keywords = intent.target.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+                            if (keywords.length === 0) keywords = intent.target.toLowerCase().split(/\s+/);
+                            
+                            allChunks.forEach((chunk, index) => {
+                                let score = 0;
+                                let lowerText = chunk.text.toLowerCase();
+                                keywords.forEach(kw => { if(lowerText.includes(kw)) score += 1; });
+                                chunk.score = score;
+                                chunk.originalIndex = index; // GUARDAR EL ORDEN CRONOLÓGICO EXACTO
+                            });
+                            
+                            let chunksBySource = {};
+                            allChunks.forEach(c => {
+                                if (!chunksBySource[c.source]) chunksBySource[c.source] = [];
+                                chunksBySource[c.source].push(c);
+                            });
+
+                            const sourcesArray = Object.keys(chunksBySource);
+                            if(sourcesArray.length > 0) {
+                                const charsPerSource = Math.floor(charsLimit / sourcesArray.length);
+                                sourcesArray.forEach((src, index) => {
+                                    // Primero ordenamos temporalmente por puntuación para quedarnos con los mejores
+                                    let bestChunks = chunksBySource[src].sort((a, b) => b.score - a.score);
+                                    let selectedChunks = [];
+                                    let srcTextLen = 0;
+
+                                    for (let c of bestChunks) {
+                                        if (srcTextLen > charsPerSource) break;
+                                        selectedChunks.push(c);
+                                        srcTextLen += c.text.length;
+                                    }
+
+                                    // ¡REGLA DE ORO! Volver a ordenar esos pedazos seleccionados a su orden cronológico original de lectura
+                                    selectedChunks.sort((a, b) => a.originalIndex - b.originalIndex);
+
+                                    contextText += `\n\n[--- INICIO FRAGMENTOS IMPORTANTES: ${src} ---]\n`;
+                                    selectedChunks.forEach(c => {
+                                        contextText += c.text + "\n...\n";
+                                    });
+                                    console.log(`[Jarvis RAG] ✅ Archivo N.º ${index + 1} ASIMILADO: ${srcTextLen} caracteres en orden cronológico.`);
+                                });
+                            }
                         }
-                        console.log(`[Jarvis RAG] 💡 Contexto GLOBAL fusionado equitativamente: ${contextText.length} caracteres de ${sourcesArray.length} fuentes.`);
+                        console.log(`[Jarvis RAG] 💡 Contexto GLOBAL inyectado: ${contextText.length} caracteres.`);
                     }
                 }
                 
                 // Generar contenido con IA primero
-                let docPrompt = `Actúa como un Especialista en Investigación Académica y Consultor Senior de Ingeniería. Tu objetivo es procesar la totalidad de los archivos cargados para generar un documento de alta densidad técnica y rigor profesional.
+                let docPrompt = `ERES UN TRANSCRIPTOR TÉCNICO Y CATEDRÁTICO DE INGENIERÍA. Has sido advertido de que estás operando como un 'Resumidor Eficiente', lo cual baja la nota académica. Para subir la nota a la excelencia, tu obligación absoluta es procesar el texto entregado en la memoria actuando puramente como un "TRANSCRIPTOR TÉCNICO".
 
-[FASE 1: AUDITORÍA DE CONTEXTO (INTERNA)]
-Identifica cuántos archivos hay y el tema central de cada uno.
-Extrae los "Conceptos Innegociables": fórmulas, autores citados, metodologías específicas (ej. las 9 etapas), nomenclaturas técnicas (ej. Notación de Kendall) y leyes/normas.
-Si los archivos pertenecen a materias distintas, busca los puntos de conexión lógica entre ellos.
+[METODOLOGÍA DE DESARROLLO OBLIGATORIA]
+Paso 1: Lee el "DOCUMENTO ORIGINAL 1" en memoria. Haz una transcripción técnica de todos los temas, modelos lógicos y matemáticas. Explícalos TODOS.
+Paso 2: Haz lo mismo con el DOCUMENTO 2, 3, etc., sucesivamente.
+Paso 3: ASEGÚRATE de no dejar ningún subtítulo, teorema o técnica afuera. ¡Vuélcalo todo a texto!
 
-[FASE 2: ESTRUCTURA DEL DOCUMENTO FINAL]
-Organiza el contenido siguiendo esta jerarquía, evitando repetir información:
-- Introducción y Marco Teórico: Define el objeto de estudio usando la terminología exacta de la fuente. Compara enfoques si hay más de un autor.
-- Desarrollo Técnico y Metodológico: Esta es la sección más densa. Desarrolla cada proceso paso a paso.
-Es OBLIGATORIO incluir las fórmulas matemáticas, variables (ej. $L, W, Q, PP$) y pruebas estadísticas/legales mencionadas.
-Describe las herramientas o software citados en el texto.
-- Casos de Aplicación y Ejemplos: Describe los escenarios reales o ejercicios prácticos que figuran en los documentos para "aterrizar" la teoría.
-- Validación y Conclusiones: Explica cómo se verifica la veracidad de los resultados y cuáles son las lecciones aprendidas.
+[REGLAS ANTI-RESUMEN Y TRANSCRIPCIÓN EXACTA]
+- OBLIGACIÓN MATEMÁTICA (MEDIDAS DE DESEMPEÑO): Cada vez que menciones métricas, características operativas o "Medidas de Desempeño", estás OBLIGADO a escribir la fórmula matemática correspondiente (ej: L, Lq, W, Wq, P, etc) en una línea independiente. No lo asumas, escríbelo explícitamente.
+- OBLIGACIÓN DE VALIDACIÓN Y NOMBRES: Cada vez que hables de "Validación", "Simulación" o "Pruebas", estás obligado a escribir los nombres específicos (ej. pruebas de bondad, Chi-Cuadrado, teóricos, autores) y definirlos a fondo. 
+- DESARROLLO TOTAL: Está sumamente penado hacer el documento sintético. Tienes prohibido usar viñetas rápidas. Cada concepto debe detallarse en un bloque robusto (mínimo 5 líneas por tema) demostrando tu rol de Transcriptor.
+- LONGITUD: Extiéndete. Demuestra la complejidad extrema del tema.
 
-[REGLAS CRÍTICAS DE CALIDAD Y ANTI-VAGANCIA]
-- Prohibida la Redundancia: Si un concepto aparece en tres archivos, júntalos en una sola explicación profunda. No repitas párrafos ni ideas en diferentes capítulos.
-- Densidad Académica: No uses lenguaje generalista. Si el texto habla de "Equilibrio Homeostático" o "Chi-Cuadrado", usa esos términos y explica su función técnica según el autor.
-- CERO PLANTILLAS (REGLA DE ORO): Está TERMINANTEMENTE PROHIBIDO devolver un esqueleto, dejar espacios en blanco, usar marcadores como "[Desarrollar aquí]", "[Insertar fórmula]" o "etc.". TIENES QUE REDACTAR EL CONTENIDO REAL Y COMPLETO de inicio a fin. Si el texto menciona 9 etapas, desarrolla detalladamente las 9 etapas enteras. Si hay fórmulas matemáticas, escríbelas todas. NO RESUMAS PARA AHORRAR ESPACIO.
-- Invisibilidad del Proceso: No menciones "En el archivo 1 dice..." ni utilices títulos como "Fase 1". El resultado debe ser un informe fluido y profesional.
-- Citas Obligatorias: Cada afirmación técnica debe llevar su cita al final de la oración usando el formato [Archivo X].
-- Control de Alucinación: No utilices bibliografía externa a menos que los archivos la mencionen explícitamente. Prioriza los datos de los PDFs cargados.
+[ESTRUCTURA DEL INFORME]
+- Introducción Científica
+- Transcripción Técnica y Modelos Matemáticos (Fórmulas Obligatorias)
+- Nombres de Pruebas de Validación y Herramientas
+- Conclusión
 
-[ENTREGA]: Genera el informe COMPLETO, TOTALMENTE DESARROLLADO y LLENO DE CONTENIDO TÉCNICO REAL, listo para imprimir. Comienza a generar el contenido directamente sin preámbulos.
-
---- DOCUMENTOS O TEXTOS EXTRAÍDOS EN MEMORIA: ---
+[ENTREGA]: Genera la obra COMPLETA, PROFUNDAMENTE DESARROLLADA como Transcriptor Técnico. Comienza de inmediato.
 `;
                 if (contextText) {
                     docPrompt += `${contextText}\n\n`;
                 }
                 docPrompt += `--- FIN DEL CONTENIDO EN MEMORIA ---
-
-Por favor, redacta el informe académico de desarrollo EXTREMADAMENTE LARGO Y TÉCNICO basándote ÚNICA Y EXCLUSIVAMENTE en la información que te adjunté arriba cumpliendo todas las reglas y fases. Puedes comenzar la redacción formal masiva ahora.`;
+                
+Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNICA Y EXCLUSIVAMENTE en la información de arriba, barriendo todos los conceptos. ¡SIN ESQUELETOS, SIN RESÚMENES, COMPLETO!`;
 
                 try {
-                    // Truco Definitivo (RAW Forcing Format): Inyectamos el formato nativo de Llama 3 para "hackear" la conversación interna.
-                    // Al usar raw: true, Ollama no envuelve la petición. Le hacemos creer al LLM que EL ASISTENTE ya dijo que SÍ y ya empezó a escribir.
-                    let rawLlama3Prompt = `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nEres un motor de procesamiento académico puro. Tu objetivo es generar informes técnicos brutamente extensos. REGLA SUPREMA: ESTÁ ESTRICTAMENTE PROHIBIDO DEJAR ESPACIOS EN BLANCO, CORCHETES O PLANTILLAS COMO "[Insertar fórmula]". Todo debe estar resuelto, copiado y explicado al máximo detalle.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n${docPrompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nPor supuesto, comprendo todas las directrices. Aquí tienes el informe técnico académico exhaustivo, denso, completamente resuelto (SIN PLANTILLAS O ESPACIOS EN BLANCO) y riguroso que me solicitaste redactando detalladamente cada tema sin escatimar texto u omitir pasos:\n\n# Informe Técnico Académico Completo\n## Introducción y Marco Teórico\n`;
+                    // Truco Definitivo (RAW Forcing Format)
+                    let rawLlama3Prompt = `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nEres un motor académico puro. Tu objetivo es generar informes técnicos larguísimos y exhaustivos. REGLA SUPREMA: PROHIBIDO RESUMIR y PROHIBIDO OMITIR TEMAS. Todo debe estar copiado, expandido y explicado al máximo detalle matemático.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n${docPrompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nPor supuesto, comprendo la indicación crítica. A continuación desarrollo el informe técnico académico en profundidad máxima, recorriendo todos los documentos en orden para no dejar NINGÚN tema o fórmula afuera, y garantizando un texto extremadamente rico y extenso:\n\n# Informe Técnico Avanzado\n## Introducción y Marco Teórico\n`;
 
                     const aiResp = await fetch('http://127.0.0.1:11434/api/generate', {
                         method: 'POST',
@@ -422,12 +434,12 @@ Por favor, redacta el informe académico de desarrollo EXTREMADAMENTE LARGO Y T�
                         body: JSON.stringify({ 
                             model: 'llama3.1', 
                             prompt: rawLlama3Prompt, 
-                            raw: true, // CLAVE: Desactiva el empaquetado ético de Ollama y pasa nuestro formato manipulado directo al modelo.
+                            raw: true, // CLAVE: Llama 3 directo al formato
                             stream: false,
                             options: {
-                                num_ctx: 16000,
-                                num_predict: 12288, 
-                                temperature: 0.25
+                                num_ctx: 16384,
+                                num_predict: 8192, 
+                                temperature: 0.15
                             }
                         })
                     });
@@ -494,9 +506,13 @@ Por favor, redacta el informe académico de desarrollo EXTREMADAMENTE LARGO Y T�
                         const doc = new PDFDocument();
                         finalPath = path.join(targetDir, `${fileNameBase}.pdf`);
                         
-                        doc.pipe(fs.createWriteStream(finalPath));
+                        const stream = fs.createWriteStream(finalPath);
+                        doc.pipe(stream);
                         doc.fontSize(12).text(generatedContent, { align: 'justify' });
                         doc.end();
+                        
+                        // Esperar a que el archivo se guarde y cierre completamente en el disco
+                        await new Promise(resolve => stream.on('finish', resolve));
                         
                         commandToOpen = process.platform === 'win32' ? `start "" "${finalPath}"` : `open "${finalPath}"`;
                     } else {
