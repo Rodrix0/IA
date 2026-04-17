@@ -1,4 +1,5 @@
 const cheerio = require('cheerio');
+const liveDataService = require('./liveDataService');
 
 // Eliminamos las credenciales de Google porque ahora somos 100% locales
 let conversationHistory = [];
@@ -46,32 +47,101 @@ function recoverIntentFromBrokenJson(rawText) {
     };
 }
 
+function recoverToolIntentFromModelContent(rawContent, userText = '') {
+    if (!rawContent || typeof rawContent !== 'string') return null;
+
+    const txt = rawContent.trim();
+    const lower = txt.toLowerCase();
+
+    // Detect function/tool style outputs even if malformed.
+    const knownActions = [
+        'send_whatsapp', 'send_email', 'search_web', 'open_app', 'schedule_task',
+        'check_reminders', 'clear_reminders', 'create_document', 'generate_prompt',
+        'chat_casual', 'search_internet', 'develop_new_skill'
+    ];
+
+    let detectedAction = '';
+    for (const a of knownActions) {
+        if (lower.includes(a)) {
+            detectedAction = a;
+            break;
+        }
+    }
+
+    if (!detectedAction) return null;
+
+    const getField = (name) => {
+        const m = txt.match(new RegExp(`"${name}"\\s*:\\s*"([\\s\\S]*?)"`, 'i'));
+        return m ? m[1].trim() : '';
+    };
+
+    let target = getField('target');
+    let message = getField('message');
+    let reply = getField('reply');
+    const time = getField('time');
+    const action_type = getField('action_type');
+
+    // Safety correction: if user explicitly asked to open WhatsApp, do not route to send_whatsapp.
+    if (/\b(abr[ií]me|abre|abrir|inicia|abr[ií])\b[\s\S]*\bwhatsapp\b/i.test(userText)) {
+        detectedAction = 'open_app';
+        if (!target) target = 'whatsapp';
+        if (!reply) reply = 'Abriendo WhatsApp.';
+        message = '';
+    }
+
+    return {
+        action: detectedAction,
+        target,
+        message,
+        time,
+        action_type,
+        reply: reply || 'Procediendo con la acción.'
+    };
+}
+
 async function performInvisibleSearch(query, maxLength = 3000) {
-    console.log(`\n[Agente Araña] 🕸️ Infiltrando motor de búsqueda (DuckDuckGo) para: "${query}"...`);
+    console.log(`\n[Agente Araña] 🕸️ Infiltrando de forma dual (Bing Vivo + DuckDuckGo Info) para: "${query}"...`);
     try {
-        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-        });
-        
-        const html = await response.text();
-        const $ = cheerio.load(html);
-        
-        $('script, style, noscript, header, footer, svg, img, button').remove();
-        
-        let scrapedText = $('.result__snippet').text() || $('body').text();
-        scrapedText = scrapedText.replace(/\s+/g, ' ').trim();
-        
-        // Le pasamos los caracteres especificados a Llama 3
-        if (maxLength > 0) {
-            scrapedText = scrapedText.substring(0, maxLength);
+        const headersBing = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0 Safari/537.36',
+            'Accept-Language': 'es-ES,es;q=0.9'
+        };
+        const headersDuck = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        };
+
+        // Búsquedas Concurrentes
+        const [resBing, resDuck] = await Promise.all([
+            fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}`, { headers: headersBing }).catch(() => null),
+            fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { headers: headersDuck }).catch(() => null)
+        ]);
+
+        let combinedText = "";
+
+        // Procesar Bing (Resultados y Widgets en Vivo)
+        if (resBing && resBing.ok) {
+            const htmlBing = await resBing.text();
+            const $1 = cheerio.load(htmlBing);
+            $1('script, style, noscript, header, footer, svg, img, button').remove();
+            let textBing = $1('#b_results').text() || "";
+            textBing = textBing.replace(/\s+/g, ' ').trim();
+            if (textBing) combinedText += `[DATOS CLAVE Y EVENTOS EN VIVO]: ${textBing.substring(0, maxLength / 2)}\n\n`;
+        }
+
+        // Procesar DuckDuckGo (Definiciones e Información)
+        if (resDuck && resDuck.ok) {
+            const htmlDuck = await resDuck.text();
+            const $2 = cheerio.load(htmlDuck);
+            $2('script, style, noscript, header, footer, svg, img, button').remove();
+            let textDuck = $2('.result__snippet').text() || "";
+            textDuck = textDuck.replace(/\s+/g, ' ').trim();
+            if (textDuck) combinedText += `[DEFINICIONES E INFORMACIÓN WIKIPEDIA]: ${textDuck.substring(0, maxLength / 2)}`;
         }
         
-        if (!scrapedText.trim()) {
-            return "El túnel de búsqueda está bloqueado, no se obtuvieron resultados.";
+        if (!combinedText.trim()) {
+            return "Las fuentes de búsqueda están bloqueadas actualmente, no se obtuvieron resultados.";
         }
-        return scrapedText;
+        return combinedText;
     } catch (e) {
         console.error("Error al romper la seguridad de búsqueda:", e.message);
         return "Fallo de conexión al raspar la web.";
@@ -80,7 +150,7 @@ async function performInvisibleSearch(query, maxLength = 3000) {
 
 async function executeLlamaChat(messages, tools = null, jsonFormat = false) {
     const payload = {
-        model: 'llama3.1', // Cambiado a 3.1 para soportar las tools nativas de Ollama
+        model: 'hermes3:8b',
         messages: messages,
         stream: false
     };
@@ -161,7 +231,8 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
             { type: "function", function: { name: "create_document", description: "Genera un informe, Word, Excel, PowerPoint o PDF ultra detallado basandote en links o temas. NO lo uses si piden un prompt o un codigo de software.", parameters: { type: "object", properties: { target: { type: "string", description: "Tema del documento" }, action_type: { type: "string", enum: ["doc", "excel", "ppt", "pdf"], description: "Formato" }, message: { type: "string", description: "Fuentes: URLs o 'search_web'" }, reply: { type: "string", description: "Respuesta hablada" } }, required: ["target", "action_type", "reply"] } } },
             { type: "function", function: { name: "generate_prompt", description: "MÁS IMPORTANTE: NUNCA USES ESTO SI EL USUARIO CHARLA O PREGUNTA QUÉ PUEDES HACER. Genera una arquitectura extensa de sistema. USAR SOLO SÍ PIDEN 'crear prompt de software'.", parameters: { type: "object", properties: { target: { type: "string", description: "La temática" }, reply: { type: "string", description: "Respuesta hablada" } }, required: ["target", "reply"] } } },
             { type: "function", function: { name: "develop_new_skill", description: "CREA SCRIPTS DE PYTHON INTERNOS. ÚSALA SÓLO si el usuario usa las palabras mágicas 'aprende al...', 'quiero que aprendas a...', o 'escribe un script para mi sistema que...'. Te sirve para aprender a hacer tareas de PC que no sabes (ej: 'Aprende a apagar la pc', 'Aprende a sumar dados').", parameters: { type: "object", properties: { target: { type: "string", description: "El objetivo detallado del script que vas a programar en Python para cumplir la habilidad" }, reply: { type: "string", description: "Lo que le dirás repitiendo su orden (ej: 'Comenzando a desarrollar habilidad para bla bla')" } }, required: ["target", "reply"] } } },
-            { type: "function", function: { name: "chat_casual", description: "Obligatorio: USAR ESTA HERRAMIENTA SIEMPRE QUE EL USUARIO HAGA CHARLA CASUAL, PREGUNTE LA HORA, EL DÍA, O PIDA TUS CAPACIDADES. Evita errores usando esto.", parameters: { type: "object", properties: { reply: { type: "string", description: "Respuesta conversacional natural al usuario calculada usando tu propio cerebro" } }, required: ["reply"] } } }
+            { type: "function", function: { name: "chat_casual", description: "Obligatorio: USAR ESTA HERRAMIENTA SIEMPRE QUE EL USUARIO HAGA CHARLA CASUAL, PREGUNTE LA HORA, EL DÍA, O PIDA TUS CAPACIDADES. Evita errores usando esto.", parameters: { type: "object", properties: { reply: { type: "string", description: "Respuesta conversacional natural al usuario calculada usando tu propio cerebro" } }, required: ["reply"] } } },
+            { type: "function", function: { name: "search_internet", description: "USA ESTA CADA VEZ QUE PIDAN: Clima, Dolar, Cripto, Deportes, Noticias o la Hora en otros países.", parameters: { type: "object", properties: { target: { type: "string", enum: ["clima", "dolar", "cripto", "hora", "general"], description: "El sub-tipo. Si es futbol o definicion, usa 'general'." }, message: { type: "string", description: "La consulta (ciudad o tema)" } }, required: ["target", "message"] } } }
         ];
 
         try {
@@ -201,29 +272,84 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
             const args = tool.arguments || {};
             intent.target = args.target || "";
             intent.message = args.message || "";
+            intent.data_type = args.data_type || "";
+            intent.query = args.query || "";
             intent.time = args.time || "";
             intent.action_type = args.action_type || "";
             intent.reply = typeof args.reply === 'string' ? args.reply : (args.reply ? JSON.stringify(args.reply) : "Procediendo con la acción.");
         } else {
-            intent.reply = typeof llamaResponse.content === 'string' ? llamaResponse.content : (llamaResponse.content ? JSON.stringify(llamaResponse.content) : "Entendido.");
+            const contentRaw = typeof llamaResponse.content === 'string'
+                ? llamaResponse.content
+                : (llamaResponse.content ? JSON.stringify(llamaResponse.content) : '');
+
+            const recoveredToolIntent = recoverToolIntentFromModelContent(contentRaw, userText);
+            if (recoveredToolIntent) {
+                intent = {
+                    ...intent,
+                    ...recoveredToolIntent
+                };
+            } else {
+                intent.reply = contentRaw || 'Entendido.';
+            }
         }
 
         // Eliminar fallback de recipient determinístico para dejar que Tool Calling de Llama 3.1 se encargue 100% de parsear el contacto y el mensaje exacto.
 
-        // Si pide búsqueda y el motor principal prefiere que lo procesemos:
-        if (intent.action === "search_web") {
-            const searchResults = await performInvisibleSearch(intent.target || userText);
+        if (intent.action === "search_web" || intent.action === "get_live_data" || intent.action === "search_internet") {
+            let apiInfo = "";
+            let isGeneral = false;
+            let targetType = (intent.target || intent.data_type || "general").toLowerCase();
+            let query = intent.message || intent.query || userText;
 
-            const secondPrompt = `El usuario preguntó: "${userText}".\nResultados de web:\n${searchResults}\n\nResponde como un asistente virtual amigable. Genera ÚNICAMENTE lo que debo decir en voz alta para responder la pregunta, basándote en esos resultados web. SIN formato JSON. Nunca digas que la info es parcial, da lo mejor con lo que hay.`;
+            const validTargets = ["clima", "dolar", "cripto", "hora", "general"];
             
-            console.log(`[Agente Araña] 🧠 Procesando resultados y emitiendo respuesta hablada...`);
-            const subMsgs = [{ role: "user", content: secondPrompt }];
-            const aiMsg = await executeLlamaChat(subMsgs, null, false);
-            intent.reply = aiMsg.content;
+            // Anti-inversión flexible: si el target alucinado no importa, extraemos el verdadero de la frase
+            if (!validTargets.includes(targetType)) {
+                for (let valid of validTargets) {
+                    if (query.toLowerCase().includes(valid) || targetType.toLowerCase().includes(valid)) {
+                        targetType = valid;
+                        break;
+                    }
+                }
+            }
+            if (!validTargets.includes(targetType)) {
+                targetType = "general"; // Fallback
+            }
+
+            console.log(`[Jarvis Scraper] Iniciando túnel para ${targetType} - ${query}...`);
+            
+            if (targetType === "clima") { apiInfo = await liveDataService.getWeather(query); }
+            else if (targetType === "dolar") { apiInfo = await liveDataService.getDolarBlue(); }
+            else if (targetType === "cripto") { apiInfo = await liveDataService.getCryptoPrice(query); }
+            else if (targetType === "hora") { 
+                const dateNow = new Date();
+                apiInfo = `CALCULA MENTALMENTE. Teniendo en cuenta que mi hora local y fecha actual es ${dateNow.toLocaleString('es-AR')}, suma o resta las horas pertinentes e indica de forma directa qué hora es en: ${query}. SOLO RESPONDE LA HORA, NINGUN OTRO DATO.`;
+            }
+            else { 
+                isGeneral = true;
+                // Llama es pésimo armando queries de búsqueda, forzamos a buscar lo que el usuario escribió textualmente
+                apiInfo = await performInvisibleSearch(userText); 
+            }
+
+            if (!isGeneral && targetType !== "hora") {
+                // Bypass Llama 3 totalmente para respuestas API en vivo perfectas (Clima, Dolar, Cripto)
+                intent.reply = apiInfo;
+                console.log(`[Jarvis Scraper] Bypass de Modelo Local -> ${apiInfo}`);
+            } else {
+                let promptInfo = `OBLIGATORIO: Tú encontraste los resultados web para responder. Resultados Crudos:\n[ ${apiInfo} ]\nResponde directamente la pregunta original ("${userText}") usando estrictamente esa Info. NO INVENTES fechas ni nombres. Si la fecha o el dato no está ahí, di que "No figura en los resultados recientes".`;
+                
+                if (targetType === "hora") {
+                    promptInfo = apiInfo; // Usamos el prompt de cálculo mental insertado arriba
+                }
+
+                const subMsgs = [{ role: "user", content: promptInfo }];
+                const aiMsg = await executeLlamaChat(subMsgs, null, false);
+                intent.reply = aiMsg.content;
+            }
         }
 
         // Ejecutar Actions de Python o Node.js:
-        if (intent.action && intent.action !== "chat" && intent.action !== "chat_casual" && intent.action !== "none" && intent.action !== "search_web") {
+        if (intent.action && intent.action !== "chat" && intent.action !== "chat_casual" && intent.action !== "none" && !["search_web", "get_live_data", "search_internet"].includes(intent.action)) {
             const sysServices = require('./systemService');
             const remServices = require('./reminderService');
             
@@ -433,7 +559,7 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                         headers: { 'Content-Type': 'application/json' },
                         dispatcher: new (require('undici').Agent)({ headersTimeout: 30 * 60 * 1000 }), // 30 Minutos Timeout
                         body: JSON.stringify({ 
-                            model: 'llama3.1', 
+                            model: 'hermes3:8b', 
                             prompt: rawLlama3Prompt, 
                             raw: true, // CLAVE: Llama 3 directo al formato
                             stream: false,
@@ -553,7 +679,7 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            model: 'llama3', 
+                            model: 'hermes3:8b', 
                             prompt: pPrompt,
                             stream: false
                         })
