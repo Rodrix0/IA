@@ -64,3 +64,26 @@ Una vez encendido:
 - **Control de tu Windows:** Di *"Abrir Chrome"* o *"Abrir Calculadora"* para pedirle a tu Node.js local que ejecute un proceso hijo y abra el software.
 
 Disfruta desarrollando y escalando este increíble asistente interactivo.
+
+---
+
+## 🛡️ Configuración del Escudo Biométrico (Seguridad OS)
+
+JARVIS OS incluye un sistema de seguridad avanzado del sistema operativo mediante Inteligencia Artificial facial local (LBPH OpenCV). Si activas el Escudo Biométrico, JARVIS custodiará tu computadora cuando la suspendas o la bloquees.
+
+### Paso 1: Configurar Windows
+Para que JARVIS pueda sobreponerse sin problemas a la aburrida pantalla de Windows:
+1. Ve a **Configuración de Windows > Cuentas > Opciones de inicio de sesión**.
+2. En la opción *"Requerir inicio de sesión al activarse desde la suspensión"*, selecciona **"Nunca"**.
+
+### Paso 2: Entrenar a JARVIS
+Usa tu voz en el panel principal para crear tu clave y rostro de seguridad:
+- 🎙️ Di: **"Jarvis, entrenar seguridad [Tu_PIN]"** (Ej: *"Jarvis, entrenar seguridad 0000"*).
+- Aparecerá una ventana para escanear tu rostro (se toman 50 fotos instantáneas locales para privacidad pura).
+
+### Paso 3: Activación y Desactivación
+El escudo actúa al instante (en 0ms y bloqueando incluso los puertos USB). Tienes control total por voz:
+- 🟢 **Encender**: *"Jarvis, activar seguridad"* o *"Prende el escudo"*
+- 🔴 **Apagar**: *"Jarvis, desactivar seguridad"* o *"Apaga la biometría"*
+
+> **Nota:** Si es la primera vez que clonas este proyecto en otra PC, recuerda instalar los requisitos internos de Python (`pip install opencv-contrib-python customtkinter numpy Pillow`).
