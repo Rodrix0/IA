@@ -273,7 +273,7 @@ function handleSystemCommand(text) {
     }
 
     // 3. Extracción estándar de comandos del sistema
-    const match = lowerText.match(/(?:abre|abrir|ir a|ve a|busca|buscar|búscame|búsqueda|preguntale a|pon|ponme|reproduce) (.+)/i);
+    const match = lowerText.match(/(?:abre|abrir|abri|abrí|abrime|abríme|abrirme|inicia|iniciar|inici[aá]|arranca|arrancar|lanza|ejecuta|ejecutar|ir a|ve a|pon|ponme|reproduce)\s+(.+)/i);
 
     if (match) {
         let appToOpen = match[1].trim();

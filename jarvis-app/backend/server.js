@@ -196,10 +196,11 @@ io.on('connection', (socket) => {
                     responseText = `Entendido. A partir de ahora, cuando me digas "${sysCommand.trigger}", abriré ${sysCommand.appName}.`;
                     action = "TRAINING_SAVED";
                 }
-                else if (sysCommand.isSystemCommand && sysCommand.isLearned) {
-                    // Solo interceptamos en la capa rápida si es un comando EXPLÍCITAMENTE aprendido o muy simple
-                    responseText = `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`;
-                        
+                else if (sysCommand.isSystemCommand) {
+                    responseText = sysCommand.isLearned
+                        ? `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`
+                        : `Abriendo ${sysCommand.appName}.`;
+
                     const activeMode = modeService.getActiveMode();
                     const success = await systemService.openApp(sysCommand.appName, activeMode.id);
                     if (!success) {
