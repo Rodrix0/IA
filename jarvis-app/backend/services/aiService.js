@@ -4,6 +4,160 @@ const liveDataService = require('./liveDataService');
 // Eliminamos las credenciales de Google porque ahora somos 100% locales
 let conversationHistory = [];
 
+function getLastAssistantReplyFromHistory() {
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+        const msg = conversationHistory[i];
+        if (msg.role !== 'assistant') continue;
+        if (typeof msg.content === 'string' && msg.content.trim()) return msg.content.trim();
+        if (msg.content && typeof msg.content.reply === 'string' && msg.content.reply.trim()) {
+            return msg.content.reply.trim();
+        }
+    }
+    return '';
+}
+
+function extractRecipientFromCurrentUtterance(text) {
+    if (!text || typeof text !== 'string') return '';
+    const cleaned = text
+        .trim()
+        .replace(/["'`´]+/g, '')
+        .replace(/[\u0000-\u001F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/[.!,;:?]+$/g, '');
+
+    const m = cleaned.match(/\b(?:manda(?:r)?|env[ií]a(?:r)?|m[aá]ndale|env[ií]ale?)\b[\s\S]*?\b(?:a|para)\s+([a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ][a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ\s._-]{1,80})$/i);
+    if (!m || !m[1]) return '';
+
+    return m[1]
+        .replace(/\b(?:por favor|gracias|porfa|ahora|ya)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractTimeFromText(text) {
+    if (!text || typeof text !== 'string') return '';
+    const m = text.match(/(?:a\s+las?|para\s+las?|a\s+la|para\s+la)\s*(\d{1,2})(?::|\.|,)?(\d{2})?\s*(am|pm)?/i);
+    if (!m) return '';
+    let hh = parseInt(m[1], 10);
+    const mm = m[2] ? parseInt(m[2], 10) : 0;
+    const meridian = (m[3] || '').toLowerCase();
+
+    if (Number.isNaN(hh) || Number.isNaN(mm) || mm < 0 || mm > 59) return '';
+
+    if (meridian) {
+        // Si el usuario dijo 20:50 pm, lo tomamos como 20:50 (ya está en 24h).
+        if (hh > 12) {
+            // keep as-is
+        } else {
+            if (meridian === 'pm' && hh < 12) hh += 12;
+            if (meridian === 'am' && hh === 12) hh = 0;
+        }
+    }
+
+    if (hh < 0 || hh > 23) return '';
+
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function extractMessageFromCurrentUtterance(text) {
+    if (!text || typeof text !== 'string') return '';
+    const m = text.match(/(?:que\s+diga|dec[ií]le|dile|mensaje\s+que\s+diga)\s+([\s\S]+?)(?:\s+a\s+las?\s+\d{1,2}(?::|\.|,)?\d{0,2}\s*(?:am|pm)?\s*)?$/i);
+    if (!m || !m[1]) return '';
+    return m[1].replace(/[.!,;:?]+$/g, '').trim();
+}
+
+function extractDocumentTopicFromUtterance(text) {
+    if (!text || typeof text !== 'string') return '';
+    const m = text.match(/(?:sobre|acerca de|del tema|de)\s+([\s\S]+)$/i);
+    if (!m || !m[1]) return '';
+    return m[1]
+        .replace(/\b(completo|completa|detallado|detallada|bien\s+hecho|bien\s+hecha)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeCommonAcademicTypos(topic) {
+    if (!topic || typeof topic !== 'string') return topic;
+    return topic
+        .replace(/\bturning\b/gi, 'turing')
+        .replace(/\baut[oó]mata\s+de\s+turing\b/gi, 'autómata de Turing');
+}
+
+function normalizeDocumentActionType(value) {
+    const t = String(value || '').toLowerCase().trim();
+    if (t === 'word' || t === 'docx' || t === 'doc') return 'doc';
+    if (t === 'powerpoint' || t === 'pptx' || t === 'ppt') return 'ppt';
+    if (t === 'xlsx' || t === 'excel') return 'excel';
+    if (t === 'pdf') return 'pdf';
+    return 'doc';
+}
+
+function inferDeterministicIntent(userText) {
+    if (!userText || typeof userText !== 'string') return null;
+    const text = userText.trim();
+    const lower = text.toLowerCase();
+
+    // Consultar tareas/recordatorios.
+    if (/(?:que|qué)\s+(?:tareas|recordatorios)\s+(?:tengo|hay)|\bmis tareas\b|\btareas pendientes\b|\brevisa mis tareas\b|\bmis recordatorios\b/i.test(text)) {
+        return {
+            action: 'check_reminders',
+            reply: 'Revisando tus tareas y recordatorios.'
+        };
+    }
+
+    // Limpiar recordatorios.
+    if (/(borra|borrar|limpia|elimina|eliminar).*(recordatorios|tareas)/i.test(text)) {
+        return {
+            action: 'clear_reminders',
+            reply: 'Limpiando tus recordatorios.'
+        };
+    }
+
+    // Programar tarea local.
+    if (/(programa|programar|agenda|agendar|agend[áa]|recordame|recu[eé]rdame)/i.test(text)) {
+        const time = extractTimeFromText(text);
+        let action_type = 'speak';
+        if (/whatsapp|mensaje|envi[áa] (un )?mensaje|manda/i.test(lower)) action_type = 'send_whatsapp';
+        if (/abr[ií]|abre|inicia|arranca/.test(lower)) action_type = 'open_app';
+
+        const target = (text.match(/(?:a|para)\s+([a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ][a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ\s._-]{1,80})$/i) || [])[1] || '';
+        const message = (text.match(/(?:que diga|dec[ií]le|dile)\s+([\s\S]+)$/i) || [])[1] || '';
+
+        return {
+            action: 'schedule_task',
+            time,
+            action_type,
+            target: target.trim(),
+            message: message.trim(),
+            reply: time ? `Perfecto, lo programo para las ${time}.` : 'Necesito la hora exacta para programarlo.'
+        };
+    }
+
+    // Crear documento.
+    if (/(crea|crear|genera|generar|haz|hacer|hazme|arm[aá]|prepar[aá]|redact[aá]).*(documento|informe|word|docx|pdf|excel|xlsx|powerpoint|ppt|presentaci[oó]n)/i.test(text)) {
+        let action_type = 'doc';
+        if (/pdf/.test(lower)) action_type = 'pdf';
+        else if (/excel|xlsx/.test(lower)) action_type = 'excel';
+        else if (/powerpoint|ppt|presentaci[oó]n/.test(lower)) action_type = 'ppt';
+
+        const targetMatch = text.match(/(?:sobre|de|del tema|acerca de)\s+([\s\S]+)$/i);
+        const target = (targetMatch && targetMatch[1] ? targetMatch[1] : text)
+            .replace(/^(crea|crear|genera|generar|haz|hacer)\s+/i, '')
+            .replace(/\b(un|una|el|la)\s+(word|docx|documento|informe|pdf|excel|xlsx|powerpoint|ppt|presentaci[oó]n)\b/gi, '')
+            .trim();
+
+        return {
+            action: 'create_document',
+            action_type: normalizeDocumentActionType(action_type),
+            target,
+            message: 'search_web',
+            reply: `Generando tu documento sobre ${target}.`
+        };
+    }
+
+    return null;
+}
+
 // Funciones legacy limpiadas porque ahora usamos Native Tool Calling a través del LLM.
 
 function recoverIntentFromBrokenJson(rawText) {
@@ -290,6 +444,82 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                 };
             } else {
                 intent.reply = contentRaw || 'Entendido.';
+            }
+        }
+
+        // Fallback determinístico para queries de recordatorios si el modelo contesta en chat.
+        const asksReminders = /(recordatorios|mis tareas|que tengo para hacer|qué tengo para hacer|tareas pendientes|revisa mis tareas|buscar mis tareas|que tareas tengo|qué tareas tengo)/i.test(userText);
+        const asksClearReminders = /(borra|borrar|limpia|elimina|eliminar).*(recordatorios|tareas)/i.test(userText);
+        if ((intent.action === 'chat' || intent.action === 'chat_casual') && asksClearReminders) {
+            intent.action = 'clear_reminders';
+            intent.reply = intent.reply || 'Limpiando tus recordatorios.';
+        } else if ((intent.action === 'chat' || intent.action === 'chat_casual') && asksReminders) {
+            intent.action = 'check_reminders';
+            intent.reply = intent.reply || 'Revisando tus tareas y recordatorios.';
+        }
+
+        // Pre-router determinístico para acciones críticas si el modelo no tool-callea.
+        if (intent.action === 'chat' || intent.action === 'chat_casual' || intent.action === 'none' || !intent.action) {
+            const deterministicIntent = inferDeterministicIntent(userText);
+            if (deterministicIntent) {
+                intent = { ...intent, ...deterministicIntent };
+            }
+        }
+
+        // Si el usuario pide Word/Documento y el modelo alucina otra acción, forzamos create_document.
+        const asksDocumentCreation = /(crea|crear|genera|generar|haz|hacer|hazme|arm[aá]|prepar[aá]|redact[aá]).*(word|docx|documento|informe|pdf|excel|xlsx|powerpoint|ppt|presentaci[oó]n)/i.test(userText);
+        if (asksDocumentCreation && intent.action !== 'create_document') {
+            const deterministicDoc = inferDeterministicIntent(userText);
+            if (deterministicDoc && deterministicDoc.action === 'create_document') {
+                intent = { ...intent, ...deterministicDoc };
+            }
+        }
+
+        // Fallback determinístico para WhatsApp cuando se pide "esa información".
+        const asksPreviousInfo = /\b(con\s+esa\s+info(?:rmaci[oó]n)?|manda\s+eso|env[ií]a\s+eso|env[ií]a\s+lo\s+anterior|manda\s+lo\s+anterior|esa\s+informaci[oó]n|esa\s+info)\b/i.test(userText);
+        const recipientFromCurrentUtterance = extractRecipientFromCurrentUtterance(userText);
+        if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && asksPreviousInfo) {
+            const lastReply = getLastAssistantReplyFromHistory();
+            if (lastReply) intent.message = lastReply;
+        }
+        if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && recipientFromCurrentUtterance) {
+            intent.target = recipientFromCurrentUtterance;
+        }
+
+        // Si piden enviar mensaje a una hora, forzamos programación en vez de envío inmediato.
+        const explicitTime = extractTimeFromText(userText);
+        const asksToSendMessage = /(env[ií]a|manda|enviar|mandar).*(mensaje|whatsapp|correo|email)/i.test(userText);
+        if (explicitTime && ((intent.action === 'send_whatsapp' || intent.action === 'send_email') || asksToSendMessage)) {
+            const actionType = intent.action === 'send_email' ? 'send_email' : 'send_whatsapp';
+            const messageFromUtterance = extractMessageFromCurrentUtterance(userText);
+            const recipient = intent.target || extractRecipientFromCurrentUtterance(userText);
+
+            intent.action = 'schedule_task';
+            intent.time = explicitTime;
+            intent.action_type = actionType;
+            intent.target = recipient || '';
+            intent.message = messageFromUtterance || intent.message || '';
+            intent.reply = `Perfecto, programé el ${actionType === 'send_email' ? 'correo' : 'mensaje'} para las ${explicitTime}.`;
+        }
+
+        // Refuerzo: tema del documento extraído desde la orden del usuario.
+        if (intent.action === 'create_document') {
+            intent.action_type = normalizeDocumentActionType(intent.action_type);
+            const explicitTopic = extractDocumentTopicFromUtterance(userText);
+            if (explicitTopic) {
+                intent.target = explicitTopic;
+            } else if (!intent.target || intent.target.trim().length < 3) {
+                intent.target = userText
+                    .replace(/^(hazme|haz|crea|crear|genera|generar|arm[aá]|prepar[aá]|redact[aá])\s+/i, '')
+                    .replace(/\b(un|una|el|la)\s+(word|docx|documento|informe|pdf|excel|xlsx|powerpoint|ppt|presentaci[oó]n)\b/gi, '')
+                    .replace(/\b(completo|completa|detallado|detallada)\b/gi, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            }
+            intent.target = normalizeCommonAcademicTypos(intent.target || 'tema solicitado');
+            if (!intent.message || !intent.message.trim()) intent.message = 'search_web';
+            if (!intent.reply || /procediendo con la acci[oó]n/i.test(intent.reply)) {
+                intent.reply = `Generando tu documento sobre ${intent.target}.`;
             }
         }
 
