@@ -6,7 +6,8 @@ import subprocess
 import os
 import ast
 import json
-import urllib.request
+import asyncio
+import httpx
 import importlib.util
 
 app = FastAPI()
@@ -28,42 +29,44 @@ class ExecuteSkillRequest(BaseModel):
     skill_name: str
     kwargs: dict = {}
 
-def call_ollama(prompt: str) -> str:
+async def call_ollama(prompt: str) -> str:
     url = "http://127.0.0.1:11434/api/generate"
     data = {
-        "model": "llama3.1",
+        "model": "hermes3",
         "prompt": prompt,
         "stream": False
     }
-    req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers={'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(req) as response:
-            result = json.loads(response.read().decode('utf-8'))
+    async with httpx.AsyncClient(timeout=120) as client:
+        try:
+            response = await client.post(url, json=data)
+            response.raise_for_status()
+            result = response.json()
             return result.get("response", "")
-    except Exception as e:
-        print(f"Error calling Ollama: {e}")
-        return ""
+        except Exception as e:
+            print(f"Error calling Ollama: {e}")
+            return ""
 
-def generate_and_test_skill(objective: str):
+async def generate_and_test_skill(objective: str):
     print(f"[Code-Act] Desarrollando nueva habilidad en las sombras: {objective}")
     
     prompt = f"""Escribe un script de Python puro que cumpla estrictamente este objetivo: "{objective}".
 REGLAS:
-1. El script DEBE tener una función llamada exactamente `execute(**kwargs)` que reciba argumentos (si aplican) y devuelva un string legible explicando el resultado exitoso.
+1. El script DEBE tener una funcion llamada exactamente `execute(**kwargs)` que reciba argumentos (si aplican) y devuelva un string legible explicandolo.
 2. NO uses dependencias externas raras que requieran `pip install`. Usa nativas: os, sys, datetime, urllib, json, subprocess, math, random.
-3. Añade un docstring a `execute` que diga exactamente qué hace en 1 sola línea corta.
-4. NUNCA escribas explicaciones ni texto fuera de los bloques de código.
-5. Usa código seguro.
+3. A�ade un docstring a `execute` que diga exactamente qu� hace en 1 sola linea corta.
+4. NUNCA escribas explicaciones ni texto fuera de los bloques de codigo.
+5. Usa c�digo seguro.
 
 Formato esperado:
 ```python
 def execute(**kwargs):
-    \"\"\"Descripción corta de lo que hace (max 100 caracteres)\"\"\"
+    \""\"Descripci�n corta de lo que hace (max 100 caracteres)\"\"\"
     # logica
     return "Resultado final"
-```"""
+```
+"""
     
-    code_response = call_ollama(prompt)
+    code_response = await call_ollama(prompt)
     if not code_response:
         print("[Code-Act] ❌ Fallo al comunicarse con Ollama.")
         return
@@ -81,7 +84,7 @@ def execute(**kwargs):
         return
 
     name_prompt = f"Dado este objetivo: '{objective}', devuelve SOLAMENTE un nombre de archivo en snake_case corto (sin python ni extensiones). Ej: 'descargar_video'"
-    name = call_ollama(name_prompt).strip().replace(" ", "_").replace("'", "").replace('"', '').replace('.', '').replace(',', '').replace('`', '').lower()
+    name = await call_ollama(name_prompt).strip().replace(" ", "_").replace("'", "").replace('"', '').replace('.', '').replace(',', '').replace('`', '').lower()
     if not name or len(name) > 30:
         import time
         name = f"custom_{int(time.time())}"
@@ -137,7 +140,7 @@ def list_skills():
                         if isinstance(node, ast.FunctionDef) and node.name == 'execute':
                             doc = ast.get_docstring(node)
                             if doc:
-                                desc = f"SCRIPT PROGRAMADO. {doc.strip().split('\n')[0]}. Úsalo EXCLUSIVAMENTE si el usuario quiere ejecutar esta herramienta específica de nuevo."
+                                desc = f"SCRIPT PROGRAMADO. {doc.strip().split('\\n')[0]}. Úsalo EXCLUSIVAMENTE si el usuario quiere ejecutar esta herramienta específica de nuevo."
             except:
                 pass
                 
@@ -201,3 +204,7 @@ def execute_action(req: ActionRequest):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+

@@ -477,14 +477,11 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
 
         // Fallback determinístico para WhatsApp cuando se pide "esa información".
         const asksPreviousInfo = /\b(con\s+esa\s+info(?:rmaci[oó]n)?|manda\s+eso|env[ií]a\s+eso|env[ií]a\s+lo\s+anterior|manda\s+lo\s+anterior|esa\s+informaci[oó]n|esa\s+info)\b/i.test(userText);
-        const recipientFromCurrentUtterance = extractRecipientFromCurrentUtterance(userText);
         if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && asksPreviousInfo) {
             const lastReply = getLastAssistantReplyFromHistory();
             if (lastReply) intent.message = lastReply;
         }
-        if ((intent.action === 'send_whatsapp' || intent.action === 'send_email') && recipientFromCurrentUtterance) {
-            intent.target = recipientFromCurrentUtterance;
-        }
+        
 
         // Si piden enviar mensaje a una hora, forzamos programación en vez de envío inmediato.
         const explicitTime = extractTimeFromText(userText);
@@ -492,13 +489,13 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         if (explicitTime && ((intent.action === 'send_whatsapp' || intent.action === 'send_email') || asksToSendMessage)) {
             const actionType = intent.action === 'send_email' ? 'send_email' : 'send_whatsapp';
             const messageFromUtterance = extractMessageFromCurrentUtterance(userText);
-            const recipient = intent.target || extractRecipientFromCurrentUtterance(userText);
+            
 
             intent.action = 'schedule_task';
             intent.time = explicitTime;
             intent.action_type = actionType;
-            intent.target = recipient || '';
-            intent.message = messageFromUtterance || intent.message || '';
+            
+            
             intent.reply = `Perfecto, programé el ${actionType === 'send_email' ? 'correo' : 'mensaje'} para las ${explicitTime}.`;
         }
 
@@ -529,7 +526,7 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
             let apiInfo = "";
             let isGeneral = false;
             let targetType = (intent.target || intent.data_type || "general").toLowerCase();
-            let query = intent.message || intent.query || userText;
+            let query = (typeof intent.message === 'object' ? JSON.stringify(intent.message) : intent.message) || intent.query || userText;
 
             const validTargets = ["clima", "dolar", "cripto", "hora", "general"];
             
@@ -1008,8 +1005,8 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             action: intent.action,
-                            target: intent.target,
-                            message: intent.message || ""
+                            target: typeof intent.target === 'object' ? JSON.stringify(intent.target) : intent.target,
+                            message: typeof intent.message === 'object' ? JSON.stringify(intent.message) : intent.message || ""
                         })
                     });
                     

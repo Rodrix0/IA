@@ -3,6 +3,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const compression = require('compression');
+const helmet = require('helmet');
 require('dotenv').config();
 
 const modeService = require('./services/modeService');
@@ -16,9 +18,15 @@ const reminderService = require('./services/reminderService');
 const powerService = require('./services/powerService');
 
 const app = express();
+
+// Optimizaciones de Seguridad y Rendimiento
+app.use(helmet({ contentSecurityPolicy: false })); // Protege cabeceras HTTP sin romper la carga local de scripts
+app.use(compression()); // Comprime las respuestas HTTP enviadas al cliente para mayor eficiencia
+
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: '*' }
+    cors: { origin: '*' },
+    perMessageDeflate: true, // Habilitar compresión en Socket.io
 });
 
 app.use(cors());
