@@ -899,7 +899,7 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                 console.log(`[Jarvis Prompt Engineer] ✍️ Generando documento detallado para: ${intent.target}`);
                 
                 // Pedimos a Ollama que redacte un prompt bien detallado
-                const pPrompt = `El usuario quiere que escribas un prompt increíblemente detallado, profesional y estructurado sobre: "${intent.target}".\nActúa como un experto en ingeniería de software. Escribe TODO el contenido del prompt en formato Markdown (arquitectura, tecnologías frontend/backend, paso a paso, buenas prácticas, etc).\nIMPORTANTE: No uses introducciones, no devuelvas JSON. Solo devuelve el Markdown puro.`;
+                const pPrompt = `El usuario te ha pedido el siguiente sistema de software:\n${userText}\n\nAct�a como Arquitecto de Software y Product Manager Senior.\nEscribe TODO el contenido del PROMPT MAESTRO en formato Markdown que describa a la perfecci�n lo que hay que programar.\nIncluye: Objetivo del producto, Descripci�n de Vistas Web/App, Modelo de Base de Datos propuesto, L�gica del Backend (Endpoints Principales), Stack Tecnol�gico propuesto, y el Paso a Paso para la IA que lo vaya a codificar.\nIMPORTANTE: No uses saludos ni introducciones, empieza directamente con el t�tulo Markdown (con #). No devuelvas JSON.`;
                 
                 try {
                     const promptResponse = await fetch('http://127.0.0.1:11434/api/generate', {
