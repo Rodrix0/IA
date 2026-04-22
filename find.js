@@ -1,0 +1,1 @@
+const fs = require('fs'); let c = fs.readFileSync('jarvis-app/backend/services/aiService.js', 'utf8'); let lines = c.split('\n'); for(let i=0; i<lines.length; i++) if(lines[i].includes('search_web')) console.log(i + ': ' + lines[i]);

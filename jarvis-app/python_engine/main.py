@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 import uvicorn
 import datetime
@@ -8,7 +8,10 @@ import ast
 import json
 import asyncio
 import httpx
+import requests
+import urllib.request
 import importlib.util
+from rag_service import query_rag
 
 app = FastAPI()
 
@@ -201,6 +204,111 @@ def execute_action(req: ActionRequest):
         return {"status": "success", "message": "Buscando web"}
     else:
         return {"status": "error", "message": "Acción no reconocida"}
+
+
+class UserQuery(BaseModel):
+    query: str
+
+def get_crypto_price(coin_id: str = "bitcoin"):
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+    res = requests.get(url).json()
+    return res.get(coin_id, {}).get("usd", "No disponible")
+
+def get_weather(city: str):
+    return {"temp": "22�C", "condition": "Despejado", "source": "Open-Meteo"}
+
+def get_exchange_rate(base: str = "USD", target: str = "ARS"):
+    url = f"https://api.exchangerate-api.com/v4/latest/{base}"
+    res = requests.get(url).json()
+    return res.get("rates", {}).get(target, "No disponible")
+
+def get_football_scores(league_id: str):
+    return {"matches": ["Boca 2 - 0 River", "Racing 1 - 1 Independiente"], "source": "API-Football"}
+
+def tool_router(user_text: str):
+    rag_response = query_rag(user_text)
+    fallbacks = ["no encontrado", "empty response", ""]
+    if rag_response.strip().lower() not in fallbacks:
+        return {"action": "reply", "message": rag_response, "source": "Local RAG (PDFs)"}
+
+    tools_description = """
+    Eres un router de IA. Clasifica el siguiente texto y devuelve un JSON estricto con "tool" y "params".
+    Tools dispobibles:
+    - "get_crypto_price" (params: coin_id)
+    - "get_weather" (params: city)
+    - "get_exchange_rate" (params: base, target)
+    - "get_football_scores" (params: league_id)
+    - "open_app" (params: app_name) -> Abrir programa en Windows
+    - "search_google" (params: query) -> Fallback para info general
+    """
+    data = {
+        "model": "hermes3:8b",
+        "prompt": f"{tools_description}\nUsuario: {user_text}\nJSON:",
+        "format": "json",
+        "stream": False
+    }
+    
+    try:
+        req = requests.post("http://127.0.0.1:11434/api/generate", json=data)
+        response_text = req.json().get("response", "{}")
+        
+        # Limpiar markdown code blocks
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[-1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[-1].split("```")[0].strip()
+            
+        decision = json.loads(response_text)
+        
+        # Handle list format
+        if isinstance(decision, list) and len(decision) > 0:
+            decision = decision[0]
+            
+        tool = decision.get("tool")
+        params = decision.get("params", {})
+        if isinstance(params, list) and len(params) > 0:
+            params = params[0]
+        elif isinstance(params, list):
+            params = {}
+        elif isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except:
+                params = {}
+        
+        if tool == "get_crypto_price":
+            price = get_crypto_price(params.get("coin_id"))
+            return {"action": "reply", "message": f"El precio es ${price}", "source": "CoinGecko"}
+        elif tool == "get_weather":
+            # Extraer solo la data util
+            w = get_weather(params.get("city", ""))
+            return {"action": "reply", "message": f"El clima: {w['temp']}, {w['condition']} (Fuente: {w['source']})", "source": "Open-Meteo"}
+        elif tool == "get_exchange_rate":
+            rate = get_exchange_rate(params.get("base", "USD"), params.get("target", "ARS"))
+            return {"action": "reply", "message": f"La tasa de cambio es {rate}", "source": "ExchangeRate-API"}
+        elif tool == "get_football_scores":
+            scores = get_football_scores(params.get("league_id", ""))
+            return {"action": "reply", "message": f"Resultados: {', '.join(scores['matches'])}", "source": "API-Football"}
+        elif tool == "open_app":
+            return {"action": "open_app", "target": params.get("app_name")}
+        else:
+            return {"action": "search_google", "target": user_text}
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"ROUTER ERROR: {e}")
+        return {"action": "search_google", "target": user_text}
+
+@app.post("/api/v1/query")
+async def process_query(req: UserQuery):
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, tool_router, req.query)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

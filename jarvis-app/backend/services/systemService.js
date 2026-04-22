@@ -309,7 +309,28 @@ function handleSystemCommand(text) {
     return { isSystemCommand: false, isTraining: false };
 }
 
+
+// --- 4. Python Router Handler ---
+async function handlePythonRouterDecision(decisionJson) {
+    if (decisionJson.action === 'reply') {
+        const sourceTxt = decisionJson.source ? ' (Fuente: ' + decisionJson.source + ')' : '';
+        return decisionJson.message + sourceTxt;
+    } 
+    else if (decisionJson.action === 'open_app') {
+        console.log('Ejecutando: ' + decisionJson.target);
+        exec('start "" "' + decisionJson.target + '"');
+        return 'Ejecutando: ' + decisionJson.target;
+    }
+    else if (decisionJson.action === 'search_google') {
+        const query = encodeURIComponent(decisionJson.target);
+        exec('start "" "https://www.google.com/search?q=' + query + '"');
+        return 'Buscando en Google: ' + decisionJson.target;
+    }
+    return "Comando desconocido";
+}
+
 module.exports = {
+    handlePythonRouterDecision,
     openApp,
     handleSystemCommand,
     saveCustomCommand
