@@ -489,11 +489,14 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         if (explicitTime && ((intent.action === 'send_whatsapp' || intent.action === 'send_email') || asksToSendMessage)) {
             const actionType = intent.action === 'send_email' ? 'send_email' : 'send_whatsapp';
             const messageFromUtterance = extractMessageFromCurrentUtterance(userText);
+            const recipientFromUtterance = extractRecipientFromCurrentUtterance(userText);
             
 
             intent.action = 'schedule_task';
             intent.time = explicitTime;
             intent.action_type = actionType;
+            if (!intent.message) intent.message = messageFromUtterance;
+            if (!intent.target) intent.target = recipientFromUtterance;
             
             
             intent.reply = `Perfecto, programé el ${actionType === 'send_email' ? 'correo' : 'mensaje'} para las ${explicitTime}.`;
@@ -523,57 +526,35 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         // Eliminar fallback de recipient determinístico para dejar que Tool Calling de Llama 3.1 se encargue 100% de parsear el contacto y el mensaje exacto.
 
         if (intent.action === "search_web" || intent.action === "get_live_data" || intent.action === "search_internet") {
-            let apiInfo = "";
-            let isGeneral = false;
-            let targetType = (intent.target || intent.data_type || "general").toLowerCase();
-            let query = (typeof intent.message === 'object' ? JSON.stringify(intent.message) : intent.message) || intent.query || userText;
-
-            const validTargets = ["clima", "dolar", "cripto", "hora", "general"];
-            
-            // Anti-inversión flexible: si el target alucinado no importa, extraemos el verdadero de la frase
-            if (!validTargets.includes(targetType)) {
-                for (let valid of validTargets) {
-                    if (query.toLowerCase().includes(valid) || targetType.toLowerCase().includes(valid)) {
-                        targetType = valid;
-                        break;
-                    }
-                }
-            }
-            if (!validTargets.includes(targetType)) {
-                targetType = "general"; // Fallback
-            }
-
-            console.log(`[Jarvis Scraper] Iniciando túnel para ${targetType} - ${query}...`);
-            
-            if (targetType === "clima") { apiInfo = await liveDataService.getWeather(query); }
-            else if (targetType === "dolar") { apiInfo = await liveDataService.getDolarBlue(); }
-            else if (targetType === "cripto") { apiInfo = await liveDataService.getCryptoPrice(query); }
-            else if (targetType === "hora") { 
-                const dateNow = new Date();
-                apiInfo = `CALCULA MENTALMENTE. Teniendo en cuenta que mi hora local y fecha actual es ${dateNow.toLocaleString('es-AR')}, suma o resta las horas pertinentes e indica de forma directa qué hora es en: ${query}. SOLO RESPONDE LA HORA, NINGUN OTRO DATO.`;
-            }
-            else { 
-                isGeneral = true;
-                // Llama es pésimo armando queries de búsqueda, forzamos a buscar lo que el usuario escribió textualmente
-                apiInfo = await performInvisibleSearch(userText); 
-            }
-
-            if (!isGeneral && targetType !== "hora") {
-                // Bypass Llama 3 totalmente para respuestas API en vivo perfectas (Clima, Dolar, Cripto)
-                intent.reply = apiInfo;
-                console.log(`[Jarvis Scraper] Bypass de Modelo Local -> ${apiInfo}`);
-            } else {
-                let promptInfo = `OBLIGATORIO: Tú encontraste los resultados web para responder. Resultados Crudos:\n[ ${apiInfo} ]\nResponde directamente la pregunta original ("${userText}") usando estrictamente esa Info. NO INVENTES fechas ni nombres. Si la fecha o el dato no está ahí, di que "No figura en los resultados recientes".`;
+        try {
+            console.log("[Python Router] Delegando tarea a nuevo Agente Python (LlamaIndex)...");
+            const fetchReq = await fetch('http://127.0.0.1:8000/api/v1/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: userText })
+            });
+            if (fetchReq.ok) {
+                const data = await fetchReq.json();
                 
-                if (targetType === "hora") {
-                    promptInfo = apiInfo; // Usamos el prompt de cálculo mental insertado arriba
-                }
-
-                const subMsgs = [{ role: "user", content: promptInfo }];
-                const aiMsg = await executeLlamaChat(subMsgs, null, false);
-                intent.reply = aiMsg.content;
+                // Asegurarnos que la pronunciaci�n diga el texto y force bypass de actions viejos
+                intent.action = "chat";
+                intent.error = false;
+                
+                // data.data is our router JSON response
+                const sysServices = require('./systemService');
+                intent.reply = await sysServices.handlePythonRouterDecision(data.data);
+            } else {
+                intent.reply = "Error: Mi sistema central en Python (LlamaIndex) devolvi� status " + fetchReq.status;
+                intent.action = "chat";
+                intent.error = true;
             }
+        } catch(e) {
+            console.error("[Python Router Error]:", e.message);
+            intent.reply = "El Agente de Razonamiento RAG no est� respondiendo. �Est� iniciado FastAPI en el puerto 8000?";
+            intent.action = "chat";
+            intent.error = true;
         }
+    }
 
         // Ejecutar Actions de Python o Node.js:
         if (intent.action && intent.action !== "chat" && intent.action !== "chat_casual" && intent.action !== "none" && !["search_web", "get_live_data", "search_internet"].includes(intent.action)) {
