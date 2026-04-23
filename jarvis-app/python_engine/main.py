@@ -205,114 +205,155 @@ def execute_action(req: ActionRequest):
     else:
         return {"status": "error", "message": "Acción no reconocida"}
 
+import re
+import datetime
+import unicodedata
+from ddgs import DDGS
 
+# --- 1. EL LIMPIADOR DE BASURA (Evita que Hermes se maree) ---
+def limpiar_texto(texto: str, max_chars: int = 1200) -> str:
+    if not texto: return ""
+    texto = re.sub(r'<[^>]+>', '', texto) # Quitar HTML
+    texto = unicodedata.normalize('NFKC', texto) # Normalizar acentos y símbolos
+    texto = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', texto) # Quitar caracteres de control
+    texto = re.sub(r'http[s]?://\S+', '', texto) # Quitar URLs que ensucian
+    texto = re.sub(r'\s+', ' ', texto).strip() # Colapsar espacios múltiples
+    return texto[:max_chars]
+
+# --- 2. EL BUSCADOR "SUPER SEARCH" (Con el filtro 'w' que descubriste) ---
+def super_search(query: str):
+    print(f"[Jarvis Search] 🌐 Investigando en tiempo real: {query}")
+    try:
+        # Usamos 'w' para asegurar resultados frescos pero no vacíos
+        with DDGS() as ddgs:
+            raw_results = list(ddgs.text(f"{query}", max_results=5, timelimit='w'))
+           
+        if not raw_results:
+            return "No se encontró información reciente en internet."
+
+        limpios = []
+        for r in raw_results:
+            titulo = limpiar_texto(r.get('title', ''))
+            cuerpo = limpiar_texto(r.get('body', ''))
+            limpios.append(f"FUENTE: {titulo} | INFO: {cuerpo}")
+
+        return "\n".join(limpios)
+    except Exception as e:
+        print(f"Error en DDGS: {e}")
+        return "Error de conexión con los servicios de búsqueda."
+
+# --- AGENTE DE DEPORTES SOFASCORE ---
+async def get_sofascore_info(team_query: str):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    
+    async with httpx.AsyncClient(headers=headers, timeout=10) as client:
+        # PASO 1: Buscar el equipo para obtener su ID
+        search_url = f"https://api.sofascore.com/api/v1/search/all?q={team_query}&page=0"
+        search_res = await client.get(search_url)
+        
+        if search_res.status_code != 200:
+            return "No pude conectar con el servidor de SofaScore."
+            
+        search_data = search_res.json()
+        
+        # Filtramos para encontrar el primer resultado que sea un "team"
+        team = next((item for item in search_data.get('results', []) if item.get('type') == 'team'), None)
+        
+        if not team:
+            return f"No encontré al equipo '{team_query}' en SofaScore."
+            
+        team_id = team['entity']['id']
+        team_name = team['entity']['name']
+        
+        # PASO 2: Traer los últimos y próximos partidos usando el ID
+        events_url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/0" # 'last' para resultados, 'next' para próximos
+        events_res = await client.get(events_url)
+        
+        if events_res.status_code != 200:
+            return f"Encontré a {team_name}, pero no pude traer sus partidos."
+            
+        events_data = events_res.json()
+        partidos = events_data.get('events', [])[:3] # Traemos los últimos 3
+        
+        resumen = f"Datos de SofaScore para {team_name}:\n"
+        for p in partidos:
+            home = p['homeTeam']['shortName']
+            away = p['awayTeam']['shortName']
+            home_score = p['homeScore'].get('current', 0)
+            away_score = p['awayScore'].get('current', 0)
+            status = p['status']['description']
+            resumen += f"- {home} {home_score} vs {away_score} {away} ({status})\n"
+            
+        return resumen
+
+# --- 3. EL ROUTER DE INTELIGENCIA ---
 class UserQuery(BaseModel):
     query: str
 
-def get_crypto_price(coin_id: str = "bitcoin"):
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
-    res = requests.get(url).json()
-    return res.get(coin_id, {}).get("usd", "No disponible")
-
-def get_weather(city: str):
-    return {"temp": "22�C", "condition": "Despejado", "source": "Open-Meteo"}
-
-def get_exchange_rate(base: str = "USD", target: str = "ARS"):
-    url = f"https://api.exchangerate-api.com/v4/latest/{base}"
-    res = requests.get(url).json()
-    return res.get("rates", {}).get(target, "No disponible")
-
-def get_football_scores(league_id: str):
-    return {"matches": ["Boca 2 - 0 River", "Racing 1 - 1 Independiente"], "source": "API-Football"}
-
-def tool_router(user_text: str):
-    rag_response = query_rag(user_text)
-    fallbacks = ["no encontrado", "empty response", ""]
-    if rag_response.strip().lower() not in fallbacks:
-        return {"action": "reply", "message": rag_response, "source": "Local RAG (PDFs)"}
-
-    tools_description = """
-    Eres un router de IA. Clasifica el siguiente texto y devuelve un JSON estricto con "tool" y "params".
-    Tools dispobibles:
-    - "get_crypto_price" (params: coin_id)
-    - "get_weather" (params: city)
-    - "get_exchange_rate" (params: base, target)
-    - "get_football_scores" (params: league_id)
-    - "open_app" (params: app_name) -> Abrir programa en Windows
-    - "search_google" (params: query) -> Fallback para info general
-    """
-    data = {
-        "model": "hermes3:8b",
-        "prompt": f"{tools_description}\nUsuario: {user_text}\nJSON:",
-        "format": "json",
-        "stream": False
-    }
-    
-    try:
-        req = requests.post("http://127.0.0.1:11434/api/generate", json=data)
-        response_text = req.json().get("response", "{}")
-        
-        # Limpiar markdown code blocks
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[-1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[-1].split("```")[0].strip()
-            
-        decision = json.loads(response_text)
-        
-        # Handle list format
-        if isinstance(decision, list) and len(decision) > 0:
-            decision = decision[0]
-            
-        tool = decision.get("tool")
-        params = decision.get("params", {})
-        if isinstance(params, list) and len(params) > 0:
-            params = params[0]
-        elif isinstance(params, list):
-            params = {}
-        elif isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except:
-                params = {}
-        
-        if tool == "get_crypto_price":
-            price = get_crypto_price(params.get("coin_id"))
-            return {"action": "reply", "message": f"El precio es ${price}", "source": "CoinGecko"}
-        elif tool == "get_weather":
-            # Extraer solo la data util
-            w = get_weather(params.get("city", ""))
-            return {"action": "reply", "message": f"El clima: {w['temp']}, {w['condition']} (Fuente: {w['source']})", "source": "Open-Meteo"}
-        elif tool == "get_exchange_rate":
-            rate = get_exchange_rate(params.get("base", "USD"), params.get("target", "ARS"))
-            return {"action": "reply", "message": f"La tasa de cambio es {rate}", "source": "ExchangeRate-API"}
-        elif tool == "get_football_scores":
-            scores = get_football_scores(params.get("league_id", ""))
-            return {"action": "reply", "message": f"Resultados: {', '.join(scores['matches'])}", "source": "API-Football"}
-        elif tool == "open_app":
-            return {"action": "open_app", "target": params.get("app_name")}
-        else:
-            return {"action": "search_google", "target": user_text}
-            
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"ROUTER ERROR: {e}")
-        return {"action": "search_google", "target": user_text}
-
 @app.post("/api/v1/query")
 async def process_query(req: UserQuery):
+    user_text = req.query
+    
+    # --- FECHA DINÁMICA AUTOMÁTICA ---
+    ahora = datetime.datetime.now()
+    fecha_hoy = ahora.strftime("%d/%m/%Y")
+    anio_actual = ahora.strftime("%Y")
+    dia_semana = ahora.strftime("%A") # Ej: Wednesday
+
+    # --- OPTIMIZACIÓN DE QUERIES SEGÚN INTENTO ---
+    search_query = user_text
+    lower_text = user_text.lower()
+    
+    if any(w in lower_text for w in ['barcelona', 'boca', 'partido', 'sofascore']):
+        raw_info = await get_sofascore_info(user_text) 
+        if "No pude conectar" in raw_info or "No encontré" in raw_info or "no pude traer" in raw_info:
+            print("[Jarvis] SofaScore sin datos o bloqueado. Usando Super Search de respaldo...")
+            search_query = f"resultado o próximo partido de {user_text} fecha horario oficial hoy"
+            raw_info = super_search(search_query)
+    else:
+        # Fallback a tu búsqueda normal de internet
+        if any(w in lower_text for w in ['dolar', 'blue', 'mep', 'cotizacion']):
+            search_query = f"cotizacion dolar blue oficial mep argentina hoy cronista ambito financiero"
+        elif any(w in lower_text for w in ['clima', 'tiempo', 'temperatura']):
+            search_query = f"clima actual en Corrientes Argentina pronóstico hoy {fecha_hoy}"
+        elif any(w in lower_text for w in ['bitcoin', 'btc', 'cripto']):
+            search_query = f"precio bitcoin hoy usd en vivo binance coinmarketcap"
+
+        raw_info = super_search(search_query)
+
+    # --- PROMPT MAESTRO (Instrucciones para que Hermes no alucine) ---
+    prompt_synthesis = f"""
+    SISTEMA: Eres Jarvis, el asistente personal de Rodrigo.
+    FECHA ACTUAL DEL SISTEMA: {dia_semana}, {fecha_hoy}.
+    LOCALIZACIÓN: Corrientes, Argentina.
+
+    DATOS OBTENIDOS DE INTERNET (ÚLTIMA SEMANA):
+    {raw_info}
+
+    PREGUNTA DEL USUARIO: {user_text}
+
+    REGLAS DE RESPUESTA CRÍTICAS:
+    1. Usa EXCLUSIVAMENTE los datos de internet proporcionados arriba.
+    2. Si los datos mencionan fechas como '2022' o '2023', IGNÓRALOS por completo.
+    3. Si internet dice que el dólar está a menos de $900, es información vieja; no la digas.
+    4. Responde de forma directa y "canchera" (argentino elegante). No digas "según los datos...", simplemente da la info.
+    5. Si no hay datos claros para hoy, di: "Señor, no logré obtener reportes confiables de esta semana para esa consulta".
+    6. PROHIBIDO INVENTAR: Si en los datos dice que hubo un error o que no se encontró información, di que no tienes los datos y NO inventes resultados falsos.
+    """
+
     try:
-        import asyncio
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, tool_router, req.query)
-        return {"status": "success", "data": result}
+        # Llamada a Ollama
+        res = requests.post("http://127.0.0.1:11434/api/generate", 
+                            json={"model": "hermes3:8b", "prompt": prompt_synthesis, "stream": False}, 
+                            timeout=25).json()
+        
+        final_reply = res.get("response", "Señor, mis sistemas de síntesis fallaron.")
+        return {"status": "success", "data": {"action": "reply", "message": final_reply}}
+    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "message": f"Fallo en Ollama: {str(e)}"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
