@@ -1,6 +1,7 @@
-const cheerio = require('cheerio');
+/* jshint esversion: 11 */
+/* eslint-env node, es2021 */
 
-// Eliminamos las credenciales de Google porque ahora somos 100% locales
+// Eliminamos las credenciales de Google y dependencias de scraping manual (cheerio)
 let conversationHistory = [];
 
 function getLastAssistantReplyFromHistory() {
@@ -253,20 +254,20 @@ function recoverToolIntentFromModelContent(rawContent, userText = '') {
 }
 
 async function performInvisibleSearch(query, maxLength = 3000) {
-    console.log(`\n[Agente Araña] 🕸️ Delegando búsqueda a Super Search Python: "${query}"...`);
+    console.log(`\n[Jarvis Sync] 🔄 Consultando Agente Python para: "${query}"...`);
     try {
-        const url = "http://127.0.0.1:8000/super_search";
-        const response = await fetch(url, {
+        const response = await fetch('http://127.0.0.1:8000/api/v1/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: query })
         });
-        const data = await response.json();
-        const text = data.result || "No hay información.";
-        return text.substring(0, maxLength);
+        const json = await response.json();
+        
+        // Retornamos el mensaje ya sintetizado por Hermes
+        return json.data.message || "No hay respuesta disponible.";
     } catch (e) {
-        console.error("Error al conectar con Super Search en Python:", e.message);
-        return "Fallo de conexión al raspar la web.";
+        console.error("Error conectando con el motor Python:", e.message);
+        return "Señor, el motor de búsqueda en Python no está respondiendo.";
     }
 }
 
@@ -345,7 +346,7 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
         const tools = [
             { type: "function", function: { name: "send_whatsapp", description: "Envía un mensaje de WhatsApp a un contacto.", parameters: { type: "object", properties: { target: { type: "string", description: "El nombre exacto del contacto (ej. gabi, mama)" }, message: { type: "string", description: "El contenido exacto a enviar. IMPORTANTE: Si el usuario te pide enviar 'esa info' o 'lo anterior', OBLIGATORIAMENTE debes buscar la informacion detallada en el historial y pegarla aquí COMPLETA." }, reply: { type: "string", description: "Lo que dirás en voz alta" } }, required: ["target", "message", "reply"] } } },
             { type: "function", function: { name: "send_email", description: "Envía un correo electrónico.", parameters: { type: "object", properties: { target: { type: "string", description: "Nombre o dirección" }, message: { type: "string", description: "El contenido exacto a enviar (reemplaza 'esta info' por la data real del historial)." }, reply: { type: "string", description: "Respuesta hablada" } }, required: ["target", "message", "reply"] } } },
-            { type: "function", function: { name: "search_web", description: "OBLIGATORIA. Úsala SIEMPRE que te pidan sobre RESULTADOS DEPORTIVOS (quién juega, cuándo, cómo salieron, tablas), CLIMA, CRIPTO, DÓLAR, o NOTICIAS ACTUALES. ESTA ES TU FUENTE DE BÚSQUEDA EXCLUSIVA. NUNCA respondas con chat_casual para estos temas ni ninguna otra porque ESTA ES LA UNICA FORMA de que te enteres de los datos de internet. SI NO LA USAS NO SABRAS NADA DEL BOCA JUNIOR. USA ESTO.", parameters: { type: "object", properties: { target: { type: "string", description: "La consulta a buscar en google." } }, required: ["target"] } } },
+            { type: "function", function: { name: "search_web", description: "Busca en internet datos fácticos (clima, clima local, biografías, significado de palabras, resultados deportivos). NUNCA LO USES PARA CONSULTAR LA HORA NI EL DÍA, JAMÁS (usa tu sistema horario local para eso).", parameters: { type: "object", properties: { target: { type: "string", description: "La consulta a buscar en google" } }, required: ["target"] } } },
             { type: "function", function: { name: "open_app", description: "Abre una aplicación web o instalada en la PC (Netflix, LOL, Youtube, Spotify, chat gpt).", parameters: { type: "object", properties: { target: { type: "string", description: "Nombre de la app limpia (ej: 'netflix', 'youtube la cobra')" }, reply: { type: "string", description: "Respuesta hablada confirmando" } }, required: ["target", "reply"] } } },
             { type: "function", function: { name: "schedule_task", description: "Programa una tarea futura a una hora indicada.", parameters: { type: "object", properties: { time: { type: "string", description: "Hora en formato HH:MM (ej. 14:00)" }, action_type: { type: "string", description: "'send_whatsapp', 'speak', o 'open_app'" }, target: { type: "string", description: "A quién va dirigido" }, message: { type: "string", description: "El mensaje a enviar/decir" }, reply: { type: "string", description: "Confirmación en voz alta" } }, required: ["time", "action_type", "reply"] } } },
             { type: "function", function: { name: "check_reminders", description: "Revisa las tareas a realizar o recordatorios activos hoy.", parameters: { type: "object", properties: { reply: { type: "string", description: "Frase de confirmación de que vas a buscar la info" } }, required: ["reply"] } } },
