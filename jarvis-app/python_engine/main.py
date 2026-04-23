@@ -211,95 +211,123 @@ import datetime
 import unicodedata
 from duckduckgo_search import DDGS
 
-# --- 1. MOTOR DE DATOS TOTAL (Dólar + Cripto en un solo bloque) ---
+# --- 1. MOTOR FINANCIERO (Mantiene tu 100% de éxito) ---
 def get_financial_snapshot():
-    """Trae toda la artillería financiera de una sola vez para que la IA no alucine"""
-    snapshot = "--- DATOS FINANCIEROS ARGENTINA (2026) ---\n"
-    
-    # Dólares (DolarAPI)
+    snapshot = "--- REPORTE FINANCIERO ARGENTINA 2026 ---\n"
     try:
         r = requests.get("https://dolarapi.com/v1/dolares", timeout=8)
         if r.status_code == 200:
             for d in r.json():
-                snapshot += f"- Dólar {d['nombre']}: Compra ${d['compra']} | Venta ${d['venta']}\n"
-    except: snapshot += "Error cargando Dólares.\n"
+                snapshot += f"Dólar {d['nombre']}: Compra ${d['compra']} | Venta ${d['venta']}\n"
+    except: snapshot += "Error Dólares.\n"
 
-    # Criptos Principales (Binance)
-    snapshot += "\n--- MERCADO CRIPTO GLOBAL (USD) ---\n"
+    snapshot += "\n--- CRIPTO (USD) ---\n"
     coins = {'BTC': 'BTCUSDT', 'ETH': 'ETHUSDT', 'SOL': 'SOLUSDT', 'XRP': 'XRPUSDT', 'USDT': 'USDTUSDC', 'TRX': 'TRXUSDT'}
     for name, ticker in coins.items():
         try:
             res = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={ticker}", timeout=5)
             if res.status_code == 200:
                 p = float(res.json()['price'])
-                snapshot += f"- {name}: {p:,.2f} USD\n"
+                snapshot += f"{name}: {p:,.2f} USD\n"
         except: continue
-        
     return snapshot
 
-# --- 2. MOTOR DEPORTIVO (SofaScore + Fallback) ---
-async def get_sports_info(query: str):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    async with httpx.AsyncClient(headers=headers, timeout=10) as client:
+# --- 2. MOTOR DEPORTIVO CON LÓGICA DE TIEMPO (Tu solución) ---
+async def get_sports_universal(query: str):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    ahora = datetime.datetime.now()
+    hoy_str = ahora.strftime("%d/%m/%Y")
+    
+    # Limpiamos el nombre del equipo
+    stopwords = ["cuándo", "cuando", "juega", "el", "la", "partido", "de", "del", "contra", "vs", "resultado"]
+    team_name = " ".join([word for word in query.lower().split() if word not in stopwords]).strip()
+    
+    if not team_name: return "No detecté el nombre del equipo."
+
+    async with httpx.AsyncClient(headers=headers, timeout=15) as client:
         try:
-            search = await client.get(f"https://api.sofascore.com/api/v1/search/all?q={query}&page=0")
+            # 1. Buscar el equipo en SofaScore
+            search = await client.get(f"https://api.sofascore.com/api/v1/search/all?q={team_name}&page=0")
             team = next((i for i in search.json().get('results', []) if i.get('type') == 'team'), None)
+            
             if team:
                 t_id = team['entity']['id']
-                events = await client.get(f"https://api.sofascore.com/api/v1/team/{t_id}/events/next/0")
-                nxt = events.json().get('events', [])[:1]
-                if nxt:
-                    p = nxt[0]
-                    fecha = datetime.datetime.fromtimestamp(p['startTimestamp']).strftime('%d/%m/%Y %H:%M')
-                    return f"PRÓXIMO PARTIDO DE {team['entity']['name']}: {p['homeTeam']['name']} vs {p['awayTeam']['name']} el {fecha} (Hora Local)."
-            
-            # Si no hay SofaScore, buscador web
+                t_name = team['entity']['name']
+                
+                # 2. Traer el ÚLTIMO y el PRÓXIMO para comparar
+                last_res = await client.get(f"https://api.sofascore.com/api/v1/team/{t_id}/events/last/0")
+                next_res = await client.get(f"https://api.sofascore.com/api/v1/team/{t_id}/events/next/0")
+                
+                historial = last_res.json().get('events', [])
+                futuro = next_res.json().get('events', [])
+                
+                contexto_futbol = f"--- CALENDARIO REAL: {t_name.upper()} ---\n"
+                contexto_futbol += f"REFERENCIA ACTUAL: {hoy_str}\n\n"
+
+                # Lógica: Extraer el resultado más reciente
+                if historial:
+                    m = historial[0]
+                    fecha_m = datetime.datetime.fromtimestamp(m['startTimestamp']).strftime('%d/%m/%Y')
+                    res_h = f"{m['homeTeam']['name']} {m['homeScore'].get('current',0)} - {m['awayScore'].get('current',0)} {m['awayTeam']['name']}"
+                    contexto_futbol += f"ÚLTIMO PARTIDO (YA PASÓ):\n- Fecha: {fecha_m}\n- Resultado: {res_h}\n\n"
+
+                # Lógica: Extraer el partido más cercano en el futuro
+                if futuro:
+                    m = futuro[0]
+                    fecha_f = datetime.datetime.fromtimestamp(m['startTimestamp']).strftime('%d/%m/%Y %H:%M')
+                    rival = m['awayTeam']['name'] if m['homeTeam']['id'] == t_id else m['homeTeam']['name']
+                    contexto_futbol += f"PRÓXIMO PARTIDO (EL QUE SIGUE):\n- Fecha: {fecha_f}\n- Rival: {rival}\n"
+                else:
+                    contexto_futbol += "No hay partidos futuros programados.\n"
+                
+                return contexto_futbol
+
+            # Fallback a Web con el año forzado
             with DDGS() as ddgs:
-                s = list(ddgs.text(f"cuándo juega {query} 2026 proximo partido", max_results=2))
-                return "\n".join([r['body'] for r in s])
-        except: return "No tengo datos deportivos ahora, señor."
+                res = list(ddgs.text(f"próximo partido de {team_name} abril mayo 2026 fixture", max_results=3))
+                return f"DATOS WEB (HOY ES {hoy_str}):\n" + "\n".join([r['body'] for r in res])
+        except: return "Servicios deportivos fuera de línea."
 
 # --- 3. ROUTER DE INTELIGENCIA ---
-class UserQuery(BaseModel):
-    query: str
+class UserQuery(BaseModel): query: str
 
 @app.post("/api/v1/query")
 async def process_query(req: UserQuery):
-    u_text = req.query.lower()
-    ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    low = req.query.lower()
+    ahora_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     
     contexto = ""
-    # Clasificación mejorada
-    es_dinero = any(w in u_text for w in ['dolar', 'blue', 'mep', 'tarjeta', 'oficial', 'bitcoin', 'btc', 'solana', 'xrp', 'tether', 'usdt', 'eth', 'tron', 'trx'])
-    es_futbol = any(w in u_text for w in ['juega', 'partido', 'barcelona', 'boca', 'river', 'madrid', 'equipo'])
+    # Clasificación por intención
+    es_dinero = any(w in low for w in ['dolar', 'blue', 'mep', 'tarjeta', 'bitcoin', 'btc', 'cripto', 'eth', 'solana', 'xrp', 'tether'])
+    es_futbol = any(w in low for w in ['juega', 'partido', 'fixture', 'vs', 'enfrenta', 'cómo salió', 'resultado'])
 
     if es_dinero:
         contexto = get_financial_snapshot()
     elif es_futbol:
-        contexto = await get_sports_info(u_text)
+        contexto = await get_sports_universal(low)
     else:
         with DDGS() as ddgs:
             try:
                 res = list(ddgs.text(f"{req.query} argentina 2026", max_results=3, timelimit='w'))
                 contexto = "\n".join([r['body'] for r in res])
-            except: contexto = "Sin conexión web."
+            except: contexto = "Sin acceso a la red."
 
-    # --- EL PROMPT DE HIERRO ---
+    # PROMPT DE ANCLAJE TEMPORAL
     prompt_synthesis = f"""
-    SISTEMA: Eres Jarvis, el asistente personal de Rodrigo. 
-    AÑO ACTUAL: 2026. LOCALIZACIÓN: Corrientes, Argentina.
+    Eres Jarvis, asistente ejecutivo de Rodrigo. 
+    AÑO ACTUAL: 2026. FECHA DE HOY: {ahora_str}.
     
-    DATOS REALES DEL SISTEMA (USAR ESTO O NADA):
+    CONTEXTO RECUPERADO (ÚNICA VERDAD):
     {contexto}
 
     PREGUNTA DEL JEFE: {req.query}
 
-    INSTRUCCIONES CRÍTICAS:
-    1. PROHIBIDO decir "No tengo acceso". Los datos de arriba SON tu acceso.
-    2. Si el contexto tiene una lista de dólares, busca el que te pidió Rodrigo (Blue, Oficial, Tarjeta, etc) y da el precio de venta.
-    3. Si el contexto tiene criptos, dalas en USD.
-    4. Si no hay datos financieros en el contexto, di: "Señor, los mercados están cerrados o fuera de línea".
-    5. No des consejos, sé directo y elegante.
+    INSTRUCCIONES:
+    1. Compara la fecha de los partidos con la FECHA DE HOY. 
+    2. Si Rodrigo pregunta "cuándo juega", prioriza el "PRÓXIMO PARTIDO".
+    3. Si pregunta "cómo salió", prioriza el "ÚLTIMO PARTIDO".
+    4. Responde de forma elegante, directa y con estilo argentino.
+    5. No digas "no tengo acceso". Si el contexto tiene datos, TÚ tienes el acceso.
     """
 
     try:
@@ -309,12 +337,10 @@ async def process_query(req: UserQuery):
                     "model": "llama3.1:latest", 
                     "prompt": prompt_synthesis, 
                     "stream": False,
-                    "options": {"temperature": 0} # 0 = CERO alucinación
+                    "options": {"temperature": 0}
                 })
             return {"status": "success", "data": {"action": "reply", "message": res.json().get("response")}}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    except Exception as e: return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
