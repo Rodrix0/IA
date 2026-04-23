@@ -211,116 +211,95 @@ import datetime
 import unicodedata
 from duckduckgo_search import DDGS
 
-# --- 1. NORMALIZADOR (Arregla "bitcoi", "theter", etc.) ---
-def normalizar_consulta(texto: str) -> str:
-    t = texto.lower()
-    # Mapeo de errores comunes
-    reemplazos = {
-        "bitcoi": "bitcoin", "theter": "tether", "u$d": "dolar",
-        "oficial": "dolar oficial", "tarjeta": "dolar tarjeta",
-        "mep": "dolar mep", "solana": "solana crypto"
-    }
-    for error, correccion in reemplazos.items():
-        if error in t: t = t.replace(error, correccion)
-    return t
-
-# --- 2. MOTOR FINANCIERO (Dólar y Cripto) ---
-def get_financial_data(query: str):
-    low = query.lower()
-    data_output = "--- DATOS FINANCIEROS REALES 2026 ---\n"
+# --- 1. MOTOR DE DATOS TOTAL (Dólar + Cripto en un solo bloque) ---
+def get_financial_snapshot():
+    """Trae toda la artillería financiera de una sola vez para que la IA no alucine"""
+    snapshot = "--- DATOS FINANCIEROS ARGENTINA (2026) ---\n"
     
-    # Dólares Argentina (Plan A)
+    # Dólares (DolarAPI)
     try:
-        r = requests.get("https://dolarapi.com/v1/dolares", timeout=10)
+        r = requests.get("https://dolarapi.com/v1/dolares", timeout=8)
         if r.status_code == 200:
             for d in r.json():
-                data_output += f"Dólar {d['nombre']}: Compra ${d['compra']} | Venta ${d['venta']}\n"
-    except: data_output += "Error en DolarAPI.\n"
+                snapshot += f"- Dólar {d['nombre']}: Compra ${d['compra']} | Venta ${d['venta']}\n"
+    except: snapshot += "Error cargando Dólares.\n"
 
-    # Criptos (Binance)
-    symbols = {'bitcoin': 'BTC', 'ethereum': 'ETH', 'solana': 'SOL', 'xrp': 'XRP', 'tron': 'TRX', 'tether': 'USDT', 'usdt': 'USDT'}
-    target = None
-    for name, sym in symbols.items():
-        if name in low: target = sym; break
-    
-    if target:
+    # Criptos Principales (Binance)
+    snapshot += "\n--- MERCADO CRIPTO GLOBAL (USD) ---\n"
+    coins = {'BTC': 'BTCUSDT', 'ETH': 'ETHUSDT', 'SOL': 'SOLUSDT', 'XRP': 'XRPUSDT', 'USDT': 'USDTUSDC', 'TRX': 'TRXUSDT'}
+    for name, ticker in coins.items():
         try:
-            ticker = f"{target}USDT" if target != "USDT" else "USDTUSDC"
-            r_c = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={ticker}", timeout=5)
-            if r_c.status_code == 200:
-                p = float(r_c.json()['price'])
-                data_output += f"CRIPTO: 1 {target} vale {p:,.2f} USD (Dólares)\n"
-        except: data_output += f"No pude conectar con Binance para {target}.\n"
-    
-    return data_output
+            res = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={ticker}", timeout=5)
+            if res.status_code == 200:
+                p = float(res.json()['price'])
+                snapshot += f"- {name}: {p:,.2f} USD\n"
+        except: continue
+        
+    return snapshot
 
-# --- 3. MOTOR DEPORTIVO (SofaScore + Web Fallback) ---
-async def get_sports_info(team_query: str):
+# --- 2. MOTOR DEPORTIVO (SofaScore + Fallback) ---
+async def get_sports_info(query: str):
     headers = {"User-Agent": "Mozilla/5.0"}
-    res_deportiva = ""
     async with httpx.AsyncClient(headers=headers, timeout=10) as client:
         try:
-            # Intento SofaScore
-            search = await client.get(f"https://api.sofascore.com/api/v1/search/all?q={team_query}&page=0")
+            search = await client.get(f"https://api.sofascore.com/api/v1/search/all?q={query}&page=0")
             team = next((i for i in search.json().get('results', []) if i.get('type') == 'team'), None)
             if team:
-                team_id = team['entity']['id']
-                events = await client.get(f"https://api.sofascore.com/api/v1/team/{team_id}/events/next/0")
-                next_event = events.json().get('events', [])[:1]
-                if next_event:
-                    p = next_event[0]
+                t_id = team['entity']['id']
+                events = await client.get(f"https://api.sofascore.com/api/v1/team/{t_id}/events/next/0")
+                nxt = events.json().get('events', [])[:1]
+                if nxt:
+                    p = nxt[0]
                     fecha = datetime.datetime.fromtimestamp(p['startTimestamp']).strftime('%d/%m/%Y %H:%M')
-                    res_deportiva = f"PRÓXIMO PARTIDO: {p['homeTeam']['name']} vs {p['awayTeam']['name']} el {fecha}."
-                else:
-                    res_deportiva = f"No hay partidos próximos programados para {team['entity']['name']}."
-            else:
-                # Fallback a Web Search específico para fútbol
-                with DDGS() as ddgs:
-                    s = list(ddgs.text(f"cuándo juega {team_query} proximo partido 2026", max_results=2))
-                    res_deportiva = "\n".join([r['body'] for r in s])
-        except: res_deportiva = "Error buscando deportes."
-    return res_deportiva
+                    return f"PRÓXIMO PARTIDO DE {team['entity']['name']}: {p['homeTeam']['name']} vs {p['awayTeam']['name']} el {fecha} (Hora Local)."
+            
+            # Si no hay SofaScore, buscador web
+            with DDGS() as ddgs:
+                s = list(ddgs.text(f"cuándo juega {query} 2026 proximo partido", max_results=2))
+                return "\n".join([r['body'] for r in s])
+        except: return "No tengo datos deportivos ahora, señor."
 
-# --- 4. ROUTER DE INTELIGENCIA ---
+# --- 3. ROUTER DE INTELIGENCIA ---
 class UserQuery(BaseModel):
     query: str
 
 @app.post("/api/v1/query")
 async def process_query(req: UserQuery):
-    original_text = req.query
-    user_text = normalizar_consulta(original_text)
-    low = user_text.lower()
+    u_text = req.query.lower()
     ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     
     contexto = ""
-    # Clasificación robusta
-    if any(w in low for w in ['dolar', 'blue', 'mep', 'tarjeta', 'oficial', 'bitcoin', 'btc', 'solana', 'xrp', 'crypto', 'tether', 'usdt', 'eth']):
-        contexto = get_financial_data(user_text)
-    elif any(w in low for w in ['juega', 'partido', 'barcelona', 'boca', 'river', 'madrid', 'futbol']):
-        contexto = await get_sports_info(user_text)
+    # Clasificación mejorada
+    es_dinero = any(w in u_text for w in ['dolar', 'blue', 'mep', 'tarjeta', 'oficial', 'bitcoin', 'btc', 'solana', 'xrp', 'tether', 'usdt', 'eth', 'tron', 'trx'])
+    es_futbol = any(w in u_text for w in ['juega', 'partido', 'barcelona', 'boca', 'river', 'madrid', 'equipo'])
+
+    if es_dinero:
+        contexto = get_financial_snapshot()
+    elif es_futbol:
+        contexto = await get_sports_info(u_text)
     else:
         with DDGS() as ddgs:
             try:
-                search = list(ddgs.text(f"{original_text} argentina 2026", max_results=3, timelimit='w'))
-                contexto = "\n".join([s.get('body', '') for s in search])
-            except: contexto = "Sin resultados web."
+                res = list(ddgs.text(f"{req.query} argentina 2026", max_results=3, timelimit='w'))
+                contexto = "\n".join([r['body'] for r in res])
+            except: contexto = "Sin conexión web."
 
-    # --- PROMPT DEFINITIVO (BLOQUEO DE "NO TENGO ACCESO") ---
+    # --- EL PROMPT DE HIERRO ---
     prompt_synthesis = f"""
-    SISTEMA: Eres Jarvis, el asistente de Rodrigo. 
-    ESTADO: Año 2026. Localización: Corrientes.
+    SISTEMA: Eres Jarvis, el asistente personal de Rodrigo. 
+    AÑO ACTUAL: 2026. LOCALIZACIÓN: Corrientes, Argentina.
     
-    CONTEXTO OBTENIDO (USAR ESTO):
+    DATOS REALES DEL SISTEMA (USAR ESTO O NADA):
     {contexto}
 
-    PREGUNTA: {original_text}
+    PREGUNTA DEL JEFE: {req.query}
 
-    REGLAS OBLIGATORIAS:
-    1. PROHIBIDO decir "No tengo acceso a tiempo real". Los datos de arriba SON tiempo real.
-    2. Si el contexto dice "PRÓXIMO PARTIDO", da la fecha y rival.
-    3. Si el contexto tiene precios de cripto (USD) o dólar (ARS), dalos directo.
-    4. Responde con estilo Jarvis (Ejecutivo, elegante, canchero).
-    5. Si el contexto está vacío o falla, di: "Señor, los servicios externos están caídos, no puedo darle el dato exacto ahora".
+    INSTRUCCIONES CRÍTICAS:
+    1. PROHIBIDO decir "No tengo acceso". Los datos de arriba SON tu acceso.
+    2. Si el contexto tiene una lista de dólares, busca el que te pidió Rodrigo (Blue, Oficial, Tarjeta, etc) y da el precio de venta.
+    3. Si el contexto tiene criptos, dalas en USD.
+    4. Si no hay datos financieros en el contexto, di: "Señor, los mercados están cerrados o fuera de línea".
+    5. No des consejos, sé directo y elegante.
     """
 
     try:
@@ -330,10 +309,9 @@ async def process_query(req: UserQuery):
                     "model": "llama3.1:latest", 
                     "prompt": prompt_synthesis, 
                     "stream": False,
-                    "options": {"temperature": 0} # 0 para que no invente nada
+                    "options": {"temperature": 0} # 0 = CERO alucinación
                 })
-            final_reply = res.json().get("response", "Sistemas fuera de línea, señor.")
-            return {"status": "success", "data": {"action": "reply", "message": final_reply}}
+            return {"status": "success", "data": {"action": "reply", "message": res.json().get("response")}}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
