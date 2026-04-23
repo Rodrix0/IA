@@ -272,7 +272,7 @@ async function performInvisibleSearch(query, maxLength = 3000) {
 
 async function executeLlamaChat(messages, tools = null, jsonFormat = false) {
     const payload = {
-        model: 'hermes3:8b',
+        model: 'llama3.1:latest',
         messages: messages,
         stream: false
     };
@@ -735,7 +735,7 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                         headers: { 'Content-Type': 'application/json' },
                         dispatcher: new (require('undici').Agent)({ headersTimeout: 30 * 60 * 1000 }), // 30 Minutos Timeout
                         body: JSON.stringify({ 
-                            model: 'hermes3:8b', 
+                            model: 'llama3.1:latest', 
                             prompt: rawLlama3Prompt, 
                             raw: true, // CLAVE: Llama 3 directo al formato
                             stream: false,
@@ -855,7 +855,7 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            model: 'hermes3:8b', 
+                            model: 'llama3.1:latest', 
                             prompt: pPrompt,
                             stream: false
                         })

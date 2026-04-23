@@ -1,5 +1,6 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
+from bs4 import BeautifulSoup
 import uvicorn
 import datetime
 import subprocess
@@ -35,7 +36,7 @@ class ExecuteSkillRequest(BaseModel):
 async def call_ollama(prompt: str) -> str:
     url = "http://127.0.0.1:11434/api/generate"
     data = {
-        "model": "hermes3",
+        "model": "llama3.1:latest",
         "prompt": prompt,
         "stream": False
     }
@@ -56,14 +57,14 @@ async def generate_and_test_skill(objective: str):
 REGLAS:
 1. El script DEBE tener una funcion llamada exactamente `execute(**kwargs)` que reciba argumentos (si aplican) y devuelva un string legible explicandolo.
 2. NO uses dependencias externas raras que requieran `pip install`. Usa nativas: os, sys, datetime, urllib, json, subprocess, math, random.
-3. A�ade un docstring a `execute` que diga exactamente qu� hace en 1 sola linea corta.
+3. Añade un docstring a `execute` que diga exactamente qué hace en 1 sola linea corta.
 4. NUNCA escribas explicaciones ni texto fuera de los bloques de codigo.
-5. Usa c�digo seguro.
+5. Usa código seguro.
 
 Formato esperado:
 ```python
 def execute(**kwargs):
-    \""\"Descripci�n corta de lo que hace (max 100 caracteres)\"\"\"
+    \"\"\"Descripción corta de lo que hace (max 100 caracteres)\"\"\"
     # logica
     return "Resultado final"
 ```
@@ -208,152 +209,134 @@ def execute_action(req: ActionRequest):
 import re
 import datetime
 import unicodedata
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 
-# --- 1. EL LIMPIADOR DE BASURA (Evita que Hermes se maree) ---
-def limpiar_texto(texto: str, max_chars: int = 1200) -> str:
-    if not texto: return ""
-    texto = re.sub(r'<[^>]+>', '', texto) # Quitar HTML
-    texto = unicodedata.normalize('NFKC', texto) # Normalizar acentos y símbolos
-    texto = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', texto) # Quitar caracteres de control
-    texto = re.sub(r'http[s]?://\S+', '', texto) # Quitar URLs que ensucian
-    texto = re.sub(r'\s+', ' ', texto).strip() # Colapsar espacios múltiples
-    return texto[:max_chars]
-
-# --- 2. EL BUSCADOR "SUPER SEARCH" (Con el filtro 'w' que descubriste) ---
-def super_search(query: str):
-    print(f"[Jarvis Search] 🌐 Investigando en tiempo real: {query}")
-    try:
-        # Usamos 'w' para asegurar resultados frescos pero no vacíos
-        with DDGS() as ddgs:
-            raw_results = list(ddgs.text(f"{query}", max_results=5, timelimit='w'))
-           
-        if not raw_results:
-            return "No se encontró información reciente en internet."
-
-        limpios = []
-        for r in raw_results:
-            titulo = limpiar_texto(r.get('title', ''))
-            cuerpo = limpiar_texto(r.get('body', ''))
-            limpios.append(f"FUENTE: {titulo} | INFO: {cuerpo}")
-
-        return "\n".join(limpios)
-    except Exception as e:
-        print(f"Error en DDGS: {e}")
-        return "Error de conexión con los servicios de búsqueda."
-
-# --- AGENTE DE DEPORTES SOFASCORE ---
-async def get_sofascore_info(team_query: str):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+# --- 1. NORMALIZADOR (Arregla "bitcoi", "theter", etc.) ---
+def normalizar_consulta(texto: str) -> str:
+    t = texto.lower()
+    # Mapeo de errores comunes
+    reemplazos = {
+        "bitcoi": "bitcoin", "theter": "tether", "u$d": "dolar",
+        "oficial": "dolar oficial", "tarjeta": "dolar tarjeta",
+        "mep": "dolar mep", "solana": "solana crypto"
     }
-    
-    async with httpx.AsyncClient(headers=headers, timeout=10) as client:
-        # PASO 1: Buscar el equipo para obtener su ID
-        search_url = f"https://api.sofascore.com/api/v1/search/all?q={team_query}&page=0"
-        search_res = await client.get(search_url)
-        
-        if search_res.status_code != 200:
-            return "No pude conectar con el servidor de SofaScore."
-            
-        search_data = search_res.json()
-        
-        # Filtramos para encontrar el primer resultado que sea un "team"
-        team = next((item for item in search_data.get('results', []) if item.get('type') == 'team'), None)
-        
-        if not team:
-            return f"No encontré al equipo '{team_query}' en SofaScore."
-            
-        team_id = team['entity']['id']
-        team_name = team['entity']['name']
-        
-        # PASO 2: Traer los últimos y próximos partidos usando el ID
-        events_url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/0" # 'last' para resultados, 'next' para próximos
-        events_res = await client.get(events_url)
-        
-        if events_res.status_code != 200:
-            return f"Encontré a {team_name}, pero no pude traer sus partidos."
-            
-        events_data = events_res.json()
-        partidos = events_data.get('events', [])[:3] # Traemos los últimos 3
-        
-        resumen = f"Datos de SofaScore para {team_name}:\n"
-        for p in partidos:
-            home = p['homeTeam']['shortName']
-            away = p['awayTeam']['shortName']
-            home_score = p['homeScore'].get('current', 0)
-            away_score = p['awayScore'].get('current', 0)
-            status = p['status']['description']
-            resumen += f"- {home} {home_score} vs {away_score} {away} ({status})\n"
-            
-        return resumen
+    for error, correccion in reemplazos.items():
+        if error in t: t = t.replace(error, correccion)
+    return t
 
-# --- 3. EL ROUTER DE INTELIGENCIA ---
+# --- 2. MOTOR FINANCIERO (Dólar y Cripto) ---
+def get_financial_data(query: str):
+    low = query.lower()
+    data_output = "--- DATOS FINANCIEROS REALES 2026 ---\n"
+    
+    # Dólares Argentina (Plan A)
+    try:
+        r = requests.get("https://dolarapi.com/v1/dolares", timeout=10)
+        if r.status_code == 200:
+            for d in r.json():
+                data_output += f"Dólar {d['nombre']}: Compra ${d['compra']} | Venta ${d['venta']}\n"
+    except: data_output += "Error en DolarAPI.\n"
+
+    # Criptos (Binance)
+    symbols = {'bitcoin': 'BTC', 'ethereum': 'ETH', 'solana': 'SOL', 'xrp': 'XRP', 'tron': 'TRX', 'tether': 'USDT', 'usdt': 'USDT'}
+    target = None
+    for name, sym in symbols.items():
+        if name in low: target = sym; break
+    
+    if target:
+        try:
+            ticker = f"{target}USDT" if target != "USDT" else "USDTUSDC"
+            r_c = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={ticker}", timeout=5)
+            if r_c.status_code == 200:
+                p = float(r_c.json()['price'])
+                data_output += f"CRIPTO: 1 {target} vale {p:,.2f} USD (Dólares)\n"
+        except: data_output += f"No pude conectar con Binance para {target}.\n"
+    
+    return data_output
+
+# --- 3. MOTOR DEPORTIVO (SofaScore + Web Fallback) ---
+async def get_sports_info(team_query: str):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    res_deportiva = ""
+    async with httpx.AsyncClient(headers=headers, timeout=10) as client:
+        try:
+            # Intento SofaScore
+            search = await client.get(f"https://api.sofascore.com/api/v1/search/all?q={team_query}&page=0")
+            team = next((i for i in search.json().get('results', []) if i.get('type') == 'team'), None)
+            if team:
+                team_id = team['entity']['id']
+                events = await client.get(f"https://api.sofascore.com/api/v1/team/{team_id}/events/next/0")
+                next_event = events.json().get('events', [])[:1]
+                if next_event:
+                    p = next_event[0]
+                    fecha = datetime.datetime.fromtimestamp(p['startTimestamp']).strftime('%d/%m/%Y %H:%M')
+                    res_deportiva = f"PRÓXIMO PARTIDO: {p['homeTeam']['name']} vs {p['awayTeam']['name']} el {fecha}."
+                else:
+                    res_deportiva = f"No hay partidos próximos programados para {team['entity']['name']}."
+            else:
+                # Fallback a Web Search específico para fútbol
+                with DDGS() as ddgs:
+                    s = list(ddgs.text(f"cuándo juega {team_query} proximo partido 2026", max_results=2))
+                    res_deportiva = "\n".join([r['body'] for r in s])
+        except: res_deportiva = "Error buscando deportes."
+    return res_deportiva
+
+# --- 4. ROUTER DE INTELIGENCIA ---
 class UserQuery(BaseModel):
     query: str
 
 @app.post("/api/v1/query")
 async def process_query(req: UserQuery):
-    user_text = req.query
+    original_text = req.query
+    user_text = normalizar_consulta(original_text)
+    low = user_text.lower()
+    ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     
-    # --- FECHA DINÁMICA AUTOMÁTICA ---
-    ahora = datetime.datetime.now()
-    fecha_hoy = ahora.strftime("%d/%m/%Y")
-    anio_actual = ahora.strftime("%Y")
-    dia_semana = ahora.strftime("%A") # Ej: Wednesday
-
-    # --- OPTIMIZACIÓN DE QUERIES SEGÚN INTENTO ---
-    search_query = user_text
-    lower_text = user_text.lower()
-    
-    if any(w in lower_text for w in ['barcelona', 'boca', 'partido', 'sofascore']):
-        raw_info = await get_sofascore_info(user_text) 
-        if "No pude conectar" in raw_info or "No encontré" in raw_info or "no pude traer" in raw_info:
-            print("[Jarvis] SofaScore sin datos o bloqueado. Usando Super Search de respaldo...")
-            search_query = f"resultado o próximo partido de {user_text} fecha horario oficial hoy"
-            raw_info = super_search(search_query)
+    contexto = ""
+    # Clasificación robusta
+    if any(w in low for w in ['dolar', 'blue', 'mep', 'tarjeta', 'oficial', 'bitcoin', 'btc', 'solana', 'xrp', 'crypto', 'tether', 'usdt', 'eth']):
+        contexto = get_financial_data(user_text)
+    elif any(w in low for w in ['juega', 'partido', 'barcelona', 'boca', 'river', 'madrid', 'futbol']):
+        contexto = await get_sports_info(user_text)
     else:
-        # Fallback a tu búsqueda normal de internet
-        if any(w in lower_text for w in ['dolar', 'blue', 'mep', 'cotizacion']):
-            search_query = f"cotizacion dolar blue oficial mep argentina hoy cronista ambito financiero"
-        elif any(w in lower_text for w in ['clima', 'tiempo', 'temperatura']):
-            search_query = f"clima actual en Corrientes Argentina pronóstico hoy {fecha_hoy}"
-        elif any(w in lower_text for w in ['bitcoin', 'btc', 'cripto']):
-            search_query = f"precio bitcoin hoy usd en vivo binance coinmarketcap"
+        with DDGS() as ddgs:
+            try:
+                search = list(ddgs.text(f"{original_text} argentina 2026", max_results=3, timelimit='w'))
+                contexto = "\n".join([s.get('body', '') for s in search])
+            except: contexto = "Sin resultados web."
 
-        raw_info = super_search(search_query)
-
-    # --- PROMPT MAESTRO (Instrucciones para que Hermes no alucine) ---
+    # --- PROMPT DEFINITIVO (BLOQUEO DE "NO TENGO ACCESO") ---
     prompt_synthesis = f"""
-    SISTEMA: Eres Jarvis, el asistente personal de Rodrigo.
-    FECHA ACTUAL DEL SISTEMA: {dia_semana}, {fecha_hoy}.
-    LOCALIZACIÓN: Corrientes, Argentina.
+    SISTEMA: Eres Jarvis, el asistente de Rodrigo. 
+    ESTADO: Año 2026. Localización: Corrientes.
+    
+    CONTEXTO OBTENIDO (USAR ESTO):
+    {contexto}
 
-    DATOS OBTENIDOS DE INTERNET (ÚLTIMA SEMANA):
-    {raw_info}
+    PREGUNTA: {original_text}
 
-    PREGUNTA DEL USUARIO: {user_text}
-
-    REGLAS DE RESPUESTA CRÍTICAS:
-    1. Usa EXCLUSIVAMENTE los datos de internet proporcionados arriba.
-    2. Si los datos mencionan fechas como '2022' o '2023', IGNÓRALOS por completo.
-    3. Si internet dice que el dólar está a menos de $900, es información vieja; no la digas.
-    4. Responde de forma directa y "canchera" (argentino elegante). No digas "según los datos...", simplemente da la info.
-    5. Si no hay datos claros para hoy, di: "Señor, no logré obtener reportes confiables de esta semana para esa consulta".
-    6. PROHIBIDO INVENTAR: Si en los datos dice que hubo un error o que no se encontró información, di que no tienes los datos y NO inventes resultados falsos.
+    REGLAS OBLIGATORIAS:
+    1. PROHIBIDO decir "No tengo acceso a tiempo real". Los datos de arriba SON tiempo real.
+    2. Si el contexto dice "PRÓXIMO PARTIDO", da la fecha y rival.
+    3. Si el contexto tiene precios de cripto (USD) o dólar (ARS), dalos directo.
+    4. Responde con estilo Jarvis (Ejecutivo, elegante, canchero).
+    5. Si el contexto está vacío o falla, di: "Señor, los servicios externos están caídos, no puedo darle el dato exacto ahora".
     """
 
     try:
-        # Llamada a Ollama
-        res = requests.post("http://127.0.0.1:11434/api/generate", 
-                            json={"model": "hermes3:8b", "prompt": prompt_synthesis, "stream": False}, 
-                            timeout=25).json()
-        
-        final_reply = res.get("response", "Señor, mis sistemas de síntesis fallaron.")
-        return {"status": "success", "data": {"action": "reply", "message": final_reply}}
-    
+        async with httpx.AsyncClient(timeout=60) as client:
+            res = await client.post("http://127.0.0.1:11434/api/generate", 
+                json={
+                    "model": "llama3.1:latest", 
+                    "prompt": prompt_synthesis, 
+                    "stream": False,
+                    "options": {"temperature": 0} # 0 para que no invente nada
+                })
+            final_reply = res.json().get("response", "Sistemas fuera de línea, señor.")
+            return {"status": "success", "data": {"action": "reply", "message": final_reply}}
     except Exception as e:
-        return {"status": "error", "message": f"Fallo en Ollama: {str(e)}"}
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -12,7 +12,7 @@ from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
 
-Settings.llm = Ollama(model="hermes3:8b", request_timeout=120.0)
+Settings.llm = Ollama(model="llama3.1:latest", request_timeout=120.0)
 Settings.embed_model = OllamaEmbedding(model_name="nomic-embed-text") 
 Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
 
