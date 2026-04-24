@@ -196,30 +196,56 @@ io.on('connection', (socket) => {
                 }
             }
             else {
-                // 2. Comandos de sistema (Abrir apps y Entrenamientos) - Conservamos la Vía Rápida primero
-                const sysCommand = systemService.handleSystemCommand(text);
-                
-                if (sysCommand.isTraining) {
-                    systemService.saveCustomCommand(sysCommand.trigger, sysCommand.appName);
-                    responseText = `Entendido. A partir de ahora, cuando me digas "${sysCommand.trigger}", abriré ${sysCommand.appName}.`;
-                    action = "TRAINING_SAVED";
-                }
-                else if (sysCommand.isSystemCommand) {
-                    responseText = sysCommand.isLearned
-                        ? `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`
-                        : `Abriendo ${sysCommand.appName}.`;
+                // === INTERCEPTOR DE MODO PROGRAMADOR ===
+                // Si la frase tiene la keyword exacta o el prompt supera los 300 chars,
+                // cortocircuitamos TODA la IA de Node y delegamos directo a Python.
+                const lowerText = text.toLowerCase();
+                const esModoPrograma = lowerText.includes("quiero que programes") ||
+                                      lowerText.includes("programá esto") ||
+                                      lowerText.includes("codeame") ||
+                                      text.length > 300;
 
-                    const activeMode = modeService.getActiveMode();
-                    const success = await systemService.openApp(sysCommand.appName, activeMode.id);
-                    if (!success) {
-                        responseText = `Hubo un inconveniente al intentar abrir la aplicación ${sysCommand.appName}.`;
+                if (esModoPrograma) {
+                    console.log(`[Jarvis Server] 🚨 MODO PROGRAMADOR: delegando a Python Developer Engine.`);
+                    try {
+                        const pyRes = await fetch('http://127.0.0.1:8000/api/v1/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: text })
+                        });
+                        const pyData = await pyRes.json();
+                        responseText = pyData?.data?.message || "Señor, el motor de desarrollo procesó su solicitud.";
+                    } catch (e) {
+                        console.error("[Jarvis Server] Python engine inalcanzable:", e.message);
+                        responseText = "Señor, no pude conectarme con el motor de desarrollo Python. ¿Está corriendo Uvicorn?";
                     }
                 }
-                // 3. Respuesta de IA (Cerebro Híbrido) - Delega todo lo demás a Ollama
+                // 2. Comandos de sistema (Abrir apps y Entrenamientos)
                 else {
-                    const activeMode = modeService.getActiveMode();
-                    const screenContext = observerService.getScreenContext();
-                    responseText = await aiService.getAIResponse(text, activeMode, screenContext);
+                    const sysCommand = systemService.handleSystemCommand(text);
+                    
+                    if (sysCommand.isTraining) {
+                        systemService.saveCustomCommand(sysCommand.trigger, sysCommand.appName);
+                        responseText = `Entendido. A partir de ahora, cuando me digas "${sysCommand.trigger}", abriré ${sysCommand.appName}.`;
+                        action = "TRAINING_SAVED";
+                    }
+                    else if (sysCommand.isSystemCommand) {
+                        responseText = sysCommand.isLearned
+                            ? `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`
+                            : `Abriendo ${sysCommand.appName}.`;
+
+                        const activeMode = modeService.getActiveMode();
+                        const success = await systemService.openApp(sysCommand.appName, activeMode.id);
+                        if (!success) {
+                            responseText = `Hubo un inconveniente al intentar abrir la aplicación ${sysCommand.appName}.`;
+                        }
+                    }
+                    // 3. Respuesta de IA (Cerebro Híbrido) - Delega todo lo demás a Ollama
+                    else {
+                        const activeMode = modeService.getActiveMode();
+                        const screenContext = observerService.getScreenContext();
+                        responseText = await aiService.getAIResponse(text, activeMode, screenContext);
+                    }
                 }
             }
 

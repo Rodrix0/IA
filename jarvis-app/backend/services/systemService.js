@@ -262,6 +262,13 @@ function handleSystemCommand(text) {
     let lowerText = text.toLowerCase().trim();
     let cleanText = lowerText.replace(/['".,?!]/g, '').trim();
 
+    // --- BYPASS DE PROGRAMADOR ---
+    // Si la frase es larguísima o detectamos explícitamente intención de código,
+    // abortamos el escaneo de apps para no abrir "Node.js" por accidente.
+    if (text.length > 300 || lowerText.includes("quiero que programes") || lowerText.includes("programá esto") || lowerText.includes("codeame")) {
+        return { isSystemCommand: false, isTraining: false };
+    }
+
     // 1. Detectar INTENCIÓN DE ENTRENAMIENTO
     // Ej: "cuando te diga hora de pelis quiero que abras netflix"
     const trainMatch = cleanText.match(/(?:cuando|si) te (?:diga|digo) (.+?) (?:quiero que|abre|abrir|ejecuta|ejecutes|ve a|vayas a|pongas) (.+)/i);
