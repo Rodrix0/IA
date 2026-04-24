@@ -13,6 +13,7 @@ import requests
 import urllib.request
 import importlib.util
 from rag_service import query_rag
+from developer_service import dev_jarvis
 
 app = FastAPI()
 
@@ -293,8 +294,19 @@ class UserQuery(BaseModel): query: str
 
 @app.post("/api/v1/query")
 async def process_query(req: UserQuery):
-    low = req.query.lower()
+    user_text = req.query
+    low = user_text.lower()
     ahora_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    
+    # --- 1. EL COMANDO MAESTRO (TU PRIORIDAD) ---
+    # Si la frase contiene exactamente lo que pediste, se corta todo lo demás.
+    es_pedido_codigo = "quiero que programes" in low or "codeame" in low or "programá esto" in low
+    
+    if es_pedido_codigo:
+        print(f"[Jarvis Logic] 🚨 PRIORIDAD ALTA: Entrando en modo Programador por orden directa.")
+        # Llamamos al servicio de desarrollo y TERMINAMOS el proceso aquí
+        result = await dev_jarvis.execute_full_project(user_text)
+        return {"status": "success", "data": {"action": "reply", "message": result}}
     
     contexto = ""
     # Clasificación por intención
