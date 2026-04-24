@@ -197,16 +197,25 @@ io.on('connection', (socket) => {
             }
             else {
                 // === INTERCEPTOR DE MODO PROGRAMADOR ===
-                // Si la frase tiene la keyword exacta o el prompt supera los 300 chars,
-                // cortocircuitamos TODA la IA de Node y delegamos directo a Python.
                 const lowerText = text.toLowerCase();
-                const esModoPrograma = lowerText.includes("quiero que programes") ||
-                                      lowerText.includes("programá esto") ||
-                                      lowerText.includes("codeame") ||
-                                      text.length > 300;
+                const activeMode = modeService.getActiveMode();
+
+                // Si el MODO PROGRAMADOR está activo, TODO va a Python (sin keywords)
+                const esModoActivado = activeMode && activeMode.id === 'programador';
+
+                // Triggers por keywords (funcionan en CUALQUIER modo)
+                const esCodigo = lowerText.includes("quiero que programes") ||
+                                 lowerText.includes("programá esto") ||
+                                 lowerText.includes("codeame") ||
+                                 text.length > 300;
+                const esCarga = /carg[aá] el proyecto|cargar proyecto|continu[aá] con|segu[ií] con|trabajá sobre/.test(lowerText);
+                const esEdicion = /modificá|modifica|cambiá|cambia |agregá|agrega |quitá|quita |sacá|saca |eliminá|elimina|elimines|elimin[aá]|poné|pon |actualizá|actualiza|seguí trabajando|sigue trabajando|editá|edita |mejorá|mejora|arreglá|arregla|reemplaz[aá]|borrá|borra |añad[ií]|añade/.test(lowerText);
+
+                const esModoPrograma = esModoActivado || esCodigo || esCarga || esEdicion;
+
 
                 if (esModoPrograma) {
-                    console.log(`[Jarvis Server] 🚨 MODO PROGRAMADOR: delegando a Python Developer Engine.`);
+                    console.log(`[Jarvis Server] 🚨 MODO DESARROLLADOR: delegando a Python.`);
                     try {
                         const pyRes = await fetch('http://127.0.0.1:8000/api/v1/query', {
                             method: 'POST',

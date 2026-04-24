@@ -297,17 +297,50 @@ async def process_query(req: UserQuery):
     user_text = req.query
     low = user_text.lower()
     ahora_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-    
-    # --- 1. EL COMANDO MAESTRO (TU PRIORIDAD) ---
-    # Si la frase contiene exactamente lo que pediste, se corta todo lo demás.
+    # --- 0. CARGAR PROYECTO POR NOMBRE ---
+    import re as _re
+    _m = _re.search(r'(?:carg[aá] el proyecto|cargar proyecto|continu[aá] con|segu[ií] con)\s+(.+)', low)
+    if _m:
+        nombre_proyecto = _m.group(1).strip()
+        result = dev_jarvis.load_project_by_name(nombre_proyecto)
+        return {"status": "success", "data": {"action": "reply", "message": result}}
+
+    # --- 1. MODO EDICIÓN (trabaja sobre el proyecto activo) ---
+    triggers_edicion = [
+        "modificá", "modifica", "cambiá", "cambia ", "agregá", "agrega ",
+        "quitá", "quita ", "sacá", "saca ", "eliminá", "elimina", "elimines",
+        "poné", "pon ", "actualizá", "actualiza", "seguí trabajando", "sigue trabajando",
+        "editá", "edita ", "mejorá", "mejora", "arreglá", "arregla",
+        "reemplazá", "reemplaza", "borrá", "borra ", "añadí", "añade",
+        "cambia el color", "cambiá el color",
+        # Nuevas variantes:
+        "separá", "separa ", "separar", "dividí", "divide", "creá", "crea ",
+        "hacé", "haz ", "convertí", "convierte", "mové", "mové", "renombrá",
+        "quiero que", "necesito que", "podés", "podes "
+    ]
+    es_edicion = dev_jarvis.active_project and any(w in low for w in triggers_edicion)
+
+    if es_edicion:
+        print(f"[Jarvis Logic] ✏️ MODO EDICIÓN: modificando proyecto '{dev_jarvis.active_project}'.")
+        result = await dev_jarvis.edit_project(user_text)
+        return {"status": "success", "data": {"action": "reply", "message": result}}
+
+    # --- 2. EL COMANDO MAESTRO (NUEVO PROYECTO) ---
     es_pedido_codigo = "quiero que programes" in low or "codeame" in low or "programá esto" in low
-    
+
     if es_pedido_codigo:
         print(f"[Jarvis Logic] 🚨 PRIORIDAD ALTA: Entrando en modo Programador por orden directa.")
-        # Llamamos al servicio de desarrollo y TERMINAMOS el proceso aquí
         result = await dev_jarvis.execute_full_project(user_text)
         return {"status": "success", "data": {"action": "reply", "message": result}}
-    
+
+    # --- 3. FALLBACK DE PROGRAMADOR ---
+    # Si hay proyecto activo y el mensaje llegó hasta acá sin matchear nada,
+    # lo tratamos como edición para evitar que Llama lo rechace.
+    if dev_jarvis.active_project:
+        print(f"[Jarvis Logic] 🔄 FALLBACK: tratando como edición de '{dev_jarvis.active_project}'.")
+        result = await dev_jarvis.edit_project(user_text)
+        return {"status": "success", "data": {"action": "reply", "message": result}}
+
     contexto = ""
     # Clasificación por intención
     es_dinero = any(w in low for w in ['dolar', 'blue', 'mep', 'tarjeta', 'bitcoin', 'btc', 'cripto', 'eth', 'solana', 'xrp', 'tether'])
