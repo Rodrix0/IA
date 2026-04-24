@@ -1,9 +1,15 @@
-import os, json, subprocess, httpx
+﻿import os, json, subprocess, httpx
+
+# â”€â”€ CONFIGURACIÃ“N DE MODELOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Modelo especialista en cÃ³digo (se usa SOLO para programar)
+CODER_MODEL = "qwen2.5-coder:7b"   # Cambialo por el que instales
+# Modelo general (chat, bÃºsquedas, respuestas)  â† lo usa main.py con llama3.1
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 WORKSPACE = os.path.join(os.path.expanduser("~"), "Desktop", "Jarvis_Projects")
 if not os.path.exists(WORKSPACE): os.makedirs(WORKSPACE)
 
-# Archivo de sesión para persistir el proyecto activo entre reinicios
+# Archivo de sesiÃ³n para persistir el proyecto activo entre reinicios
 SESSION_FILE = os.path.join(WORKSPACE, ".jarvis_session.json")
 
 def _save_session(project_name: str):
@@ -19,17 +25,17 @@ def _load_session() -> str | None:
             return None
     return None
 
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # PALETAS DE COLOR DISPONIBLES
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 PALETAS = {
     "cafe_dorado": {
-        "nombre": "Café Dorado (default)",
+        "nombre": "CafÃ© Dorado (default)",
         "accent": "#C9A96E", "accent_light": "#E8C98A", "accent_dark": "#8B6914",
         "bg": "#0D0D0D", "bg2": "#1A1A1A", "bg3": "#252525",
         "text": "#F0EDE8", "text_muted": "#9A9087",
         "font_title": "Playfair Display", "font_body": "Inter",
-        "keywords": ["cafe", "cafetería", "restaurant", "comida", "bar", "cerveza", "vino", "gourmet"]
+        "keywords": ["cafe", "cafeterÃ­a", "restaurant", "comida", "bar", "cerveza", "vino", "gourmet"]
     },
     "neon_tech": {
         "nombre": "Neon Tech",
@@ -37,7 +43,7 @@ PALETAS = {
         "bg": "#070B14", "bg2": "#0D1321", "bg3": "#141D2E",
         "text": "#E0F4FF", "text_muted": "#5A7A99",
         "font_title": "Orbitron", "font_body": "Rajdhani",
-        "keywords": ["tecnología", "tech", "software", "app", "saas", "startup", "sistema", "plataforma", "inteligencia", "ia", "robot"]
+        "keywords": ["tecnologÃ­a", "tech", "software", "app", "saas", "startup", "sistema", "plataforma", "inteligencia", "ia", "robot"]
     },
     "verde_naturaleza": {
         "nombre": "Verde Naturaleza",
@@ -45,7 +51,7 @@ PALETAS = {
         "bg": "#0A1A0A", "bg2": "#112211", "bg3": "#1A2E1A",
         "text": "#E8F5E9", "text_muted": "#6A9B6E",
         "font_title": "Lora", "font_body": "Inter",
-        "keywords": ["eco", "naturaleza", "verde", "orgánico", "planta", "jardín", "sostenible", "salud", "gym", "deporte", "fitness"]
+        "keywords": ["eco", "naturaleza", "verde", "orgÃ¡nico", "planta", "jardÃ­n", "sostenible", "salud", "gym", "deporte", "fitness"]
     },
     "violeta_creativo": {
         "nombre": "Violeta Creativo",
@@ -53,7 +59,7 @@ PALETAS = {
         "bg": "#0D0514", "bg2": "#14082B", "bg3": "#1E0E3A",
         "text": "#F3E5F5", "text_muted": "#9575CD",
         "font_title": "Playfair Display", "font_body": "Inter",
-        "keywords": ["arte", "diseño", "creativo", "agencia", "portfolio", "música", "moda", "estudio", "galería"]
+        "keywords": ["arte", "diseÃ±o", "creativo", "agencia", "portfolio", "mÃºsica", "moda", "estudio", "galerÃ­a"]
     },
     "rojo_impacto": {
         "nombre": "Rojo Impacto",
@@ -61,7 +67,7 @@ PALETAS = {
         "bg": "#0D0000", "bg2": "#1A0505", "bg3": "#260808",
         "text": "#FFEBEE", "text_muted": "#EF9A9A",
         "font_title": "Bebas Neue", "font_body": "Inter",
-        "keywords": ["marketing", "ventas", "urgente", "oferta", "promoción", "descuento", "impacto", "deporte", "juego"]
+        "keywords": ["marketing", "ventas", "urgente", "oferta", "promociÃ³n", "descuento", "impacto", "deporte", "juego"]
     },
     "azul_corporativo": {
         "nombre": "Azul Corporativo",
@@ -69,7 +75,7 @@ PALETAS = {
         "bg": "#030912", "bg2": "#071525", "bg3": "#0C1F38",
         "text": "#E3F2FD", "text_muted": "#5C8BB0",
         "font_title": "Roboto Slab", "font_body": "Roboto",
-        "keywords": ["empresa", "corporativo", "finanzas", "banco", "seguros", "legal", "consultoría", "negocios", "servicios"]
+        "keywords": ["empresa", "corporativo", "finanzas", "banco", "seguros", "legal", "consultorÃ­a", "negocios", "servicios"]
     },
     "blanco_minimalista": {
         "nombre": "Blanco Minimalista",
@@ -77,30 +83,30 @@ PALETAS = {
         "bg": "#FAFAFA", "bg2": "#F5F5F5", "bg3": "#EEEEEE",
         "text": "#212121", "text_muted": "#757575",
         "font_title": "Playfair Display", "font_body": "Inter",
-        "keywords": ["minimalista", "limpio", "simple", "moderno", "portfolio personal", "blog", "médico", "clínica"]
+        "keywords": ["minimalista", "limpio", "simple", "moderno", "portfolio personal", "blog", "mÃ©dico", "clÃ­nica"]
     },
     "naranja_energia": {
-        "nombre": "Naranja Energía",
+        "nombre": "Naranja EnergÃ­a",
         "accent": "#FF6F00", "accent_light": "#FFB74D", "accent_dark": "#E65100",
         "bg": "#0D0600", "bg2": "#1A0E00", "bg3": "#261500",
         "text": "#FFF8E1", "text_muted": "#FFCC80",
         "font_title": "Montserrat", "font_body": "Inter",
-        "keywords": ["energía", "construcción", "inmobiliaria", "logística", "transporte", "delivery", "comida rápida", "hamburguesa"]
+        "keywords": ["energÃ­a", "construcciÃ³n", "inmobiliaria", "logÃ­stica", "transporte", "delivery", "comida rÃ¡pida", "hamburguesa"]
     }
 }
 
 def detect_palette(prompt: str, palette_override: str = None) -> dict:
-    """Elige la paleta más apropiada para el proyecto."""
+    """Elige la paleta mÃ¡s apropiada para el proyecto."""
     if palette_override:
         key = palette_override.lower().replace(" ", "_")
         if key in PALETAS:
             return PALETAS[key]
-        # Búsqueda parcial por nombre
+        # BÃºsqueda parcial por nombre
         for k, v in PALETAS.items():
             if palette_override.lower() in v["nombre"].lower() or palette_override.lower() in k:
                 return PALETAS[k]
 
-    # Detección automática por palabras clave del prompt
+    # DetecciÃ³n automÃ¡tica por palabras clave del prompt
     low = prompt.lower()
     best_palette = "cafe_dorado"
     best_score = 0
@@ -314,7 +320,7 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
   <div class="nav-links">
     <a href="#inicio">Inicio</a>
     <a href="#mesas">Reservas</a>
-    <a href="#menu">Menú</a>
+    <a href="#menu">MenÃº</a>
     <a href="#seguimiento">Mi Pedido</a>
     <a href="#pago">Pagar</a>
   </div>
@@ -322,12 +328,12 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 
 <!-- HERO -->
 <section class="hero" id="inicio">
-  <div class="hero-badge">☕ Experiencia Premium de Café</div>
+  <div class="hero-badge">â˜• Experiencia Premium de CafÃ©</div>
   <h1>{project_title}</h1>
   <p>{hero_description}</p>
   <div class="hero-btns">
     <button class="btn-primary" onclick="document.getElementById('mesas').scrollIntoView({{behavior:'smooth'}})">Reservar Mesa</button>
-    <button class="btn-outline" onclick="document.getElementById('menu').scrollIntoView({{behavior:'smooth'}})">Ver Menú</button>
+    <button class="btn-outline" onclick="document.getElementById('menu').scrollIntoView({{behavior:'smooth'}})">Ver MenÃº</button>
   </div>
 </section>
 
@@ -335,15 +341,15 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 <div class="stats">
   <div class="stat"><div class="stat-num">48</div><div class="stat-label">Mesas</div></div>
   <div class="stat"><div class="stat-num">{menu_count}+</div><div class="stat-label">Especialidades</div></div>
-  <div class="stat"><div class="stat-num">4.9★</div><div class="stat-label">Calificación</div></div>
+  <div class="stat"><div class="stat-num">4.9â˜…</div><div class="stat-label">CalificaciÃ³n</div></div>
   <div class="stat"><div class="stat-num">15m</div><div class="stat-label">Tiempo promedio</div></div>
 </div>
 
 <!-- MESAS -->
 <section id="mesas">
   <div class="section-tag">Plano del local</div>
-  <h2 class="section-title">Reservá tu Mesa</h2>
-  <p class="section-sub">Seleccioná una mesa disponible. Las mesas en dorado están libres, las rojas ya tienen reserva.</p>
+  <h2 class="section-title">ReservÃ¡ tu Mesa</h2>
+  <p class="section-sub">SeleccionÃ¡ una mesa disponible. Las mesas en dorado estÃ¡n libres, las rojas ya tienen reserva.</p>
   <div class="mapa-grid" id="mesaGrid"></div>
   <br>
   <button class="btn-primary" onclick="confirmarReserva()" style="margin-top:1rem;">Confirmar Reserva</button>
@@ -352,35 +358,35 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 <!-- MENU -->
 <section id="menu">
   <div class="section-tag">Nuestras Especialidades</div>
-  <h2 class="section-title">El Menú</h2>
-  <p class="section-sub">Seleccioná tus favoritos y los enviamos directo a tu mesa.</p>
+  <h2 class="section-title">El MenÃº</h2>
+  <p class="section-sub">SeleccionÃ¡ tus favoritos y los enviamos directo a tu mesa.</p>
   <div class="menu-grid" id="menuGrid"></div>
 </section>
 
 <!-- SEGUIMIENTO -->
 <section id="seguimiento">
   <div class="section-tag">Estado en tiempo real</div>
-  <h2 class="section-title">Seguí tu Pedido</h2>
-  <p class="section-sub">Mirá en qué etapa está tu pedido sin tener que preguntar.</p>
+  <h2 class="section-title">SeguÃ­ tu Pedido</h2>
+  <p class="section-sub">MirÃ¡ en quÃ© etapa estÃ¡ tu pedido sin tener que preguntar.</p>
   <div class="tracking-bar">
     <div class="track-step done">
-      <div class="track-circle">✓</div>
+      <div class="track-circle">âœ“</div>
       <div class="track-label">Confirmado</div>
     </div>
     <div class="track-step done">
-      <div class="track-circle">✓</div>
-      <div class="track-label">En preparación</div>
+      <div class="track-circle">âœ“</div>
+      <div class="track-label">En preparaciÃ³n</div>
     </div>
     <div class="track-step active">
-      <div class="track-circle">☕</div>
+      <div class="track-circle">â˜•</div>
       <div class="track-label">Casi listo</div>
     </div>
     <div class="track-step">
-      <div class="track-circle">🚀</div>
+      <div class="track-circle">ðŸš€</div>
       <div class="track-label">En camino</div>
     </div>
     <div class="track-step">
-      <div class="track-circle">✅</div>
+      <div class="track-circle">âœ…</div>
       <div class="track-label">Entregado</div>
     </div>
   </div>
@@ -389,17 +395,17 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 
 <!-- PAGO -->
 <section id="pago">
-  <div class="section-tag">Checkout rápido</div>
+  <div class="section-tag">Checkout rÃ¡pido</div>
   <h2 class="section-title">Pagar el Pedido</h2>
   <div class="pago-card">
     <p style="color:var(--text-muted);">Total a pagar</p>
     <div class="pago-total" id="totalDisplay">$0.00</div>
     <div style="border-top: 1px solid rgba(201,169,110,0.15); padding-top:1.5rem;">
-      <p style="font-size:.9rem; color:var(--text-muted); margin-bottom:.8rem;">Método de pago</p>
+      <p style="font-size:.9rem; color:var(--text-muted); margin-bottom:.8rem;">MÃ©todo de pago</p>
       <div class="pago-metodos">
-        <div class="metodo selected" onclick="selectMetodo(this)">💳 Tarjeta</div>
-        <div class="metodo" onclick="selectMetodo(this)">📱 MercadoPago</div>
-        <div class="metodo" onclick="selectMetodo(this)">💵 Efectivo</div>
+        <div class="metodo selected" onclick="selectMetodo(this)">ðŸ’³ Tarjeta</div>
+        <div class="metodo" onclick="selectMetodo(this)">ðŸ“± MercadoPago</div>
+        <div class="metodo" onclick="selectMetodo(this)">ðŸ’µ Efectivo</div>
       </div>
     </div>
     <button class="btn-primary" style="width:100%; margin-top:1rem;" onclick="procesarPago()">Pagar Ahora</button>
@@ -408,7 +414,7 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 
 <footer>
   <div class="footer-logo">{project_title}</div>
-  <div class="footer-text">© 2026 · Todos los derechos reservados</div>
+  <div class="footer-text">Â© 2026 Â· Todos los derechos reservados</div>
 </footer>
 
 <script>
@@ -422,12 +428,12 @@ for (let i = 1; i <= 24; i++) {{
   const libre = Math.random() > 0.35;
   const el = document.createElement('div');
   el.className = `mesa ${{libre ? 'libre' : 'ocupada'}}`;
-  el.innerHTML = `<span class="mesa-icon">${{libre ? '🪑' : '🔴'}}</span>Mesa ${{i}}`;
+  el.innerHTML = `<span class="mesa-icon">${{libre ? 'ðŸª‘' : 'ðŸ”´'}}</span>Mesa ${{i}}`;
   if (libre) el.onclick = () => {{ mesaSeleccionada = i; document.querySelectorAll('.mesa.libre').forEach(m=>m.style.outline=''); el.style.outline='2px solid var(--gold)'; }};
   mesaGrid.appendChild(el);
 }}
 
-// Generar menú
+// Generar menÃº
 const menuGrid = document.getElementById('menuGrid');
 MENU_DATA.forEach(item => {{
   carrito[item.nombre] = 0;
@@ -460,8 +466,8 @@ function calcularTotal() {{
 }}
 
 function confirmarReserva() {{
-  if (!mesaSeleccionada) {{ alert('Por favor seleccioná una mesa primero.'); return; }}
-  alert(`✅ Reserva confirmada para Mesa ${{mesaSeleccionada}}. Tu código es: BH-${{Math.floor(Math.random()*9000)+1000}}`);
+  if (!mesaSeleccionada) {{ alert('Por favor seleccionÃ¡ una mesa primero.'); return; }}
+  alert(`âœ… Reserva confirmada para Mesa ${{mesaSeleccionada}}. Tu cÃ³digo es: BH-${{Math.floor(Math.random()*9000)+1000}}`);
 }}
 
 function selectMetodo(el) {{
@@ -471,8 +477,8 @@ function selectMetodo(el) {{
 
 function procesarPago() {{
   const total = document.getElementById('totalDisplay').textContent;
-  if (total === '$0.00') {{ alert('Agregá al menos un item al carrito.'); return; }}
-  alert(`✅ Pago procesado por ${{total}}. ¡Gracias por elegir {project_title}!`);
+  if (total === '$0.00') {{ alert('AgregÃ¡ al menos un item al carrito.'); return; }}
+  alert(`âœ… Pago procesado por ${{total}}. Â¡Gracias por elegir {project_title}!`);
 }}
 </script>
 </body>
@@ -480,27 +486,27 @@ function procesarPago() {{
 
 class JarvisDeveloper:
     def __init__(self):
-        # Recuperar el proyecto activo de la sesión anterior
+        # Recuperar el proyecto activo de la sesiÃ³n anterior
         self.active_project = _load_session()
         if self.active_project:
-            print(f"[Jarvis Developer] 📂 Sesión recuperada: proyecto activo = '{self.active_project}'")
+            print(f"[Jarvis Developer] ðŸ“‚ SesiÃ³n recuperada: proyecto activo = '{self.active_project}'")
 
     async def execute_full_project(self, big_prompt: str):
-        print("[Jarvis Architect] 🏗️ Generando proyecto premium...")
+        print("[Jarvis Architect] ðŸ—ï¸ Generando proyecto premium...")
 
         content_prompt = f"""
         Analiza este proyecto y devuelve SOLO un JSON con esta estructura exacta:
         {{
             "project_name": "brewhub_app",
             "project_title": "BrewHub",
-            "hero_description": "Una descripción elegante de 2 oraciones para la cafetería.",
+            "hero_description": "Una descripciÃ³n elegante de 2 oraciones para la cafeterÃ­a.",
             "menu": [
-                {{"nombre": "Espresso", "descripcion": "Café intenso de origen único", "precio": 350, "emoji": "☕"}},
-                {{"nombre": "Cappuccino", "descripcion": "Espuma suave con leche cremosa", "precio": 450, "emoji": "🍵"}},
-                {{"nombre": "Croissant", "descripcion": "Hojaldrado, mantecoso y crujiente", "precio": 280, "emoji": "🥐"}},
-                {{"nombre": "Tostado Especial", "descripcion": "Pan de masa madre con ingredientes premium", "precio": 520, "emoji": "🥪"}},
-                {{"nombre": "Americano", "descripcion": "Café largo suave y aromático", "precio": 320, "emoji": "☕"}},
-                {{"nombre": "Cheesecake", "descripcion": "Postre cremoso con frutos rojos", "precio": 680, "emoji": "🍰"}}
+                {{"nombre": "Espresso", "descripcion": "CafÃ© intenso de origen Ãºnico", "precio": 350, "emoji": "â˜•"}},
+                {{"nombre": "Cappuccino", "descripcion": "Espuma suave con leche cremosa", "precio": 450, "emoji": "ðŸµ"}},
+                {{"nombre": "Croissant", "descripcion": "Hojaldrado, mantecoso y crujiente", "precio": 280, "emoji": "ðŸ¥"}},
+                {{"nombre": "Tostado Especial", "descripcion": "Pan de masa madre con ingredientes premium", "precio": 520, "emoji": "ðŸ¥ª"}},
+                {{"nombre": "Americano", "descripcion": "CafÃ© largo suave y aromÃ¡tico", "precio": 320, "emoji": "â˜•"}},
+                {{"nombre": "Cheesecake", "descripcion": "Postre cremoso con frutos rojos", "precio": 680, "emoji": "ðŸ°"}}
             ]
         }}
 
@@ -511,7 +517,7 @@ class JarvisDeveloper:
             async with httpx.AsyncClient(timeout=120) as client:
                 res = await client.post("http://127.0.0.1:11434/api/generate",
                     json={
-                        "model": "llama3.1:latest",
+                        "model": CODER_MODEL,
                         "prompt": content_prompt,
                         "format": "json",
                         "stream": False,
@@ -522,21 +528,21 @@ class JarvisDeveloper:
             data = {
                 "project_name": "brewhub_app",
                 "project_title": "BrewHub",
-                "hero_description": "Reservá tu mesa, pedí tu favorito y pagá sin esperas. La cafetería que se adapta a vos.",
+                "hero_description": "ReservÃ¡ tu mesa, pedÃ­ tu favorito y pagÃ¡ sin esperas. La cafeterÃ­a que se adapta a vos.",
                 "menu": [
-                    {"nombre": "Espresso", "descripcion": "Café intenso de origen único", "precio": 350, "emoji": "☕"},
-                    {"nombre": "Cappuccino", "descripcion": "Espuma suave con leche cremosa", "precio": 450, "emoji": "🍵"},
-                    {"nombre": "Croissant", "descripcion": "Hojaldrado, mantecoso y crujiente", "precio": 280, "emoji": "🥐"},
-                    {"nombre": "Tostado Especial", "descripcion": "Pan de masa madre con ingredientes premium", "precio": 520, "emoji": "🥪"},
-                    {"nombre": "Americano", "descripcion": "Café largo suave y aromático", "precio": 320, "emoji": "☕"},
-                    {"nombre": "Cheesecake", "descripcion": "Postre cremoso con frutos rojos", "precio": 680, "emoji": "🍰"}
+                    {"nombre": "Espresso", "descripcion": "CafÃ© intenso de origen Ãºnico", "precio": 350, "emoji": "â˜•"},
+                    {"nombre": "Cappuccino", "descripcion": "Espuma suave con leche cremosa", "precio": 450, "emoji": "ðŸµ"},
+                    {"nombre": "Croissant", "descripcion": "Hojaldrado, mantecoso y crujiente", "precio": 280, "emoji": "ðŸ¥"},
+                    {"nombre": "Tostado Especial", "descripcion": "Pan de masa madre con ingredientes premium", "precio": 520, "emoji": "ðŸ¥ª"},
+                    {"nombre": "Americano", "descripcion": "CafÃ© largo suave y aromÃ¡tico", "precio": 320, "emoji": "â˜•"},
+                    {"nombre": "Cheesecake", "descripcion": "Postre cremoso con frutos rojos", "precio": 680, "emoji": "ðŸ°"}
                 ]
             }
 
         # Adjuntamos el prompt original para que detect_palette analice el contexto
         data["_raw_prompt"] = big_prompt
 
-        # Detectar si el usuario pidió explícitamente una paleta ("con paleta neon", "estilo azul corporativo")
+        # Detectar si el usuario pidiÃ³ explÃ­citamente una paleta ("con paleta neon", "estilo azul corporativo")
         import re
         palette_match = re.search(r'(?:paleta|estilo|colores?)\s+([\w\s]+?)(?:\.|,|$)', big_prompt.lower())
         palette_override = palette_match.group(1).strip() if palette_match else None
@@ -546,13 +552,13 @@ class JarvisDeveloper:
     def _deploy_to_windows(self, data, palette_override=None):
         p_name = data.get("project_name", "brewhub_app")
         p_title = data.get("project_title", "BrewHub")
-        hero_desc = data.get("hero_description", "La mejor experiencia de café de la ciudad.")
+        hero_desc = data.get("hero_description", "La mejor experiencia de cafÃ© de la ciudad.")
         menu = data.get("menu", [])
 
-        # Seleccionar paleta: override manual > detección automática por contenido
+        # Seleccionar paleta: override manual > detecciÃ³n automÃ¡tica por contenido
         raw_prompt = data.get("_raw_prompt", p_title)
         paleta = detect_palette(raw_prompt, palette_override)
-        print(f"[Jarvis Designer] 🎨 Paleta seleccionada: {paleta['nombre']}")
+        print(f"[Jarvis Designer] ðŸŽ¨ Paleta seleccionada: {paleta['nombre']}")
 
         self.active_project = p_name
         _save_session(p_name)
@@ -586,15 +592,15 @@ class JarvisDeveloper:
         except Exception:
             pass
 
-        return f"Señor, '{p_title}' desplegado con paleta '{paleta['nombre']}'. Navegador y VS Code abiertos."
+        return f"SeÃ±or, '{p_title}' desplegado con paleta '{paleta['nombre']}'. Navegador y VS Code abiertos."
 
     async def edit_project(self, instruccion: str):
-        """Edición quirúrgica: elimina con regex, agrega solo el snippet nuevo."""
+        """EdiciÃ³n quirÃºrgica: elimina con regex, agrega solo el snippet nuevo."""
         if not self.active_project:
-            return "Señor, no hay proyecto activo. Cargá uno primero."
+            return "SeÃ±or, no hay proyecto activo. CargÃ¡ uno primero."
         index_path = os.path.join(WORKSPACE, self.active_project, "index.html")
         if not os.path.exists(index_path):
-            return f"No encontré index.html en '{self.active_project}'."
+            return f"No encontrÃ© index.html en '{self.active_project}'."
 
         with open(index_path, "r", encoding="utf-8") as f:
             html = f.read()
@@ -603,7 +609,7 @@ class JarvisDeveloper:
         low = instruccion.lower()
         acciones = []
 
-        # Mapa: palabra clave → patrón de la sección a eliminar
+        # Mapa: palabra clave â†’ patrÃ³n de la secciÃ³n a eliminar
         SECCIONES = {
             "mesa": r'<section[^>]*id=["\']mesas["\'][^>]*>.*?</section>',
             "reserva": r'<section[^>]*id=["\']mesas["\'][^>]*>.*?</section>',
@@ -615,24 +621,24 @@ class JarvisDeveloper:
         }
 
         # 1. Eliminar secciones
-        if any(p in low for p in ["elimina", "eliminá", "elimines", "quita", "quitá", "saca", "sacá", "borra"]):
+        if any(p in low for p in ["elimina", "eliminÃ¡", "elimines", "quita", "quitÃ¡", "saca", "sacÃ¡", "borra"]):
             for clave, patron in SECCIONES.items():
                 if clave in low:
                     nuevo = re.sub(patron, '', html, flags=re.DOTALL | re.IGNORECASE)
                     if nuevo != html:
                         html = nuevo
-                        acciones.append(f"eliminé '{clave}'")
+                        acciones.append(f"eliminÃ© '{clave}'")
 
-        # 2. Agregar nuevo bloque — Llama genera SOLO el snippet (no el archivo completo)
-        if any(p in low for p in ["agrega", "agregá", "añade", "añadí", "incluye", "pon ", "poné", "implementá"]):
-            prompt = f"""Generá SOLO un bloque HTML (sin DOCTYPE ni html/head/body) para esto:
+        # 2. Agregar nuevo bloque â€” Llama genera SOLO el snippet (no el archivo completo)
+        if any(p in low for p in ["agrega", "agregÃ¡", "aÃ±ade", "aÃ±adÃ­", "incluye", "pon ", "ponÃ©", "implementÃ¡"]):
+            prompt = f"""GenerÃ¡ SOLO un bloque HTML (sin DOCTYPE ni html/head/body) para esto:
 PEDIDO: {instruccion}
-Usá variables CSS: --accent, --dark, --dark2, --dark3, --text, --text-muted.
-Devolvé ÚNICAMENTE el HTML del bloque, nada más."""
+UsÃ¡ variables CSS: --accent, --dark, --dark2, --dark3, --text, --text-muted.
+DevolvÃ© ÃšNICAMENTE el HTML del bloque, nada mÃ¡s."""
             try:
                 async with httpx.AsyncClient(timeout=90) as client:
                     res = await client.post("http://127.0.0.1:11434/api/generate",
-                        json={"model": "llama3.1:latest", "prompt": prompt,
+                        json={"model": CODER_MODEL, "prompt": prompt,
                               "stream": False, "options": {"temperature": 0.2, "num_predict": 1500}})
                     snippet = res.json().get("response", "").strip()
                 snippet = re.sub(r'^```(?:html)?\n?', '', snippet, flags=re.IGNORECASE)
@@ -640,14 +646,14 @@ Devolvé ÚNICAMENTE el HTML del bloque, nada más."""
                 if len(snippet) > 50:
                     insert_before = "</footer>" if "</footer>" in html else "</body>"
                     html = html.replace(insert_before, f"\n{snippet}\n{insert_before}", 1)
-                    acciones.append("agregué el nuevo bloque")
+                    acciones.append("agreguÃ© el nuevo bloque")
             except Exception as e:
                 acciones.append(f"error generando bloque: {e}")
 
         # 3. SEPARAR / DIVIDIR en archivos individuales
-        if any(p in low for p in ["separ", "divid", "extraé", "extrae", "desglosa"]):
+        if any(p in low for p in ["separ", "divid", "extraÃ©", "extrae", "desglosa"]):
             p_path = os.path.join(WORKSPACE, self.active_project)
-            # Extraemos cada sección y la guardamos en su propio archivo
+            # Extraemos cada secciÃ³n y la guardamos en su propio archivo
             secciones_generadas = []
             for id_sec in ["inicio", "mesas", "menu", "seguimiento", "pago"]:
                 patron = rf'<section[^>]*id=["\'{id_sec}["\'][^>]*>.*?</section>'
@@ -664,26 +670,26 @@ Devolvé ÚNICAMENTE el HTML del bloque, nada más."""
                         f.write(wrapper)
                     secciones_generadas.append(nombre_archivo)
             if secciones_generadas:
-                acciones.append(f"separé en archivos: {', '.join(secciones_generadas)}")
+                acciones.append(f"separÃ© en archivos: {', '.join(secciones_generadas)}")
                 os.system(f'start "" "{p_path}"')  # Abrir carpeta del proyecto
 
-        # 4. FALLBACK GENÉRICO — Llama genera SOLO el resultado concreto
+        # 4. FALLBACK GENÃ‰RICO â€” Llama genera SOLO el resultado concreto
         if not acciones:
-            prompt = f"""Eres un programador web experto. Tenés que hacer esto sobre un proyecto HTML:
+            prompt = f"""Eres un programador web experto. TenÃ©s que hacer esto sobre un proyecto HTML:
 
-INSTRUCCIÓN: {instruccion}
+INSTRUCCIÃ“N: {instruccion}
 
 El proyecto usa estas variables CSS: --accent, --dark, --dark2, --dark3, --text, --text-muted.
 
-Según la instrucción:
-- Si hay que crear un archivo nuevo: generá SOLO el contenido HTML del archivo, sin explicaciones.
-- Si hay que modificar CSS: generá SOLO el bloque <style> o las reglas CSS necesarias.
-- Si hay que agregar algo: generá SOLO el bloque HTML a insertar.
-NO expliques nada. NO saludes. Solo el código."""
+SegÃºn la instrucciÃ³n:
+- Si hay que crear un archivo nuevo: generÃ¡ SOLO el contenido HTML del archivo, sin explicaciones.
+- Si hay que modificar CSS: generÃ¡ SOLO el bloque <style> o las reglas CSS necesarias.
+- Si hay que agregar algo: generÃ¡ SOLO el bloque HTML a insertar.
+NO expliques nada. NO saludes. Solo el cÃ³digo."""
             try:
                 async with httpx.AsyncClient(timeout=90) as client:
                     res = await client.post("http://127.0.0.1:11434/api/generate",
-                        json={"model": "llama3.1:latest", "prompt": prompt,
+                        json={"model": CODER_MODEL, "prompt": prompt,
                               "stream": False, "options": {"temperature": 0.2, "num_predict": 1500}})
                     resultado = res.json().get("response", "").strip()
                 resultado = re.sub(r'^```(?:html|css)?\n?', '', resultado, flags=re.IGNORECASE)
@@ -697,7 +703,7 @@ NO expliques nada. NO saludes. Solo el código."""
                         with open(out_path, "w", encoding="utf-8") as f:
                             f.write(resultado)
                         os.system(f'start "" "{out_path}"')
-                        acciones.append(f"creé el archivo '{nombre_nuevo}'")
+                        acciones.append(f"creÃ© el archivo '{nombre_nuevo}'")
                     else:
                         # Es un snippet, lo insertamos en el index
                         insert_before = "</footer>" if "</footer>" in html else "</body>"
@@ -705,24 +711,24 @@ NO expliques nada. NO saludes. Solo el código."""
                         with open(index_path, "w", encoding="utf-8") as f:
                             f.write(html)
                         os.system(f'start "" "{index_path}"')
-                        acciones.append("apliqué el cambio solicitado")
+                        acciones.append("apliquÃ© el cambio solicitado")
                 else:
-                    return "Señor, el modelo no generó un resultado válido. Reformulá el pedido."
+                    return "SeÃ±or, el modelo no generÃ³ un resultado vÃ¡lido. ReformulÃ¡ el pedido."
             except Exception as e:
-                return f"Error en fallback genérico: {e}"
+                return f"Error en fallback genÃ©rico: {e}"
 
-        if acciones and any(a not in ["apliqué el cambio solicitado"] for a in acciones):
+        if acciones and any(a not in ["apliquÃ© el cambio solicitado"] for a in acciones):
             # Para acciones de eliminar/agregar que modificaron el html principal
-            if any(p in low for p in ["elimina", "eliminá", "elimines", "quita", "agrega", "agregá", "añade"]):
+            if any(p in low for p in ["elimina", "eliminÃ¡", "elimines", "quita", "agrega", "agregÃ¡", "aÃ±ade"]):
                 with open(index_path, "w", encoding="utf-8") as f:
                     f.write(html)
                 os.system(f'start "" "{index_path}"')
 
-        return f"Listo, señor: {' | '.join(acciones)}." if acciones else "Señor, no pude detectar qué cambio hacer."
+        return f"Listo, seÃ±or: {' | '.join(acciones)}." if acciones else "SeÃ±or, no pude detectar quÃ© cambio hacer."
 
     def load_project_by_name(self, nombre: str) -> str:
-        """Carga un proyecto existente por nombre para seguir trabajando sobre él."""
-        # Limpiamos posibles artículos o comillas que diga el usuario
+        """Carga un proyecto existente por nombre para seguir trabajando sobre Ã©l."""
+        # Limpiamos posibles artÃ­culos o comillas que diga el usuario
         nombre_limpio = nombre.strip().strip('"\"').replace(" ", "_").lower()
 
         # Buscamos la carpeta en el workspace (coincidencia parcial)
@@ -736,13 +742,13 @@ NO expliques nada. NO saludes. Solo el código."""
         if not candidatos:
             proyectos = [d for d in os.listdir(WORKSPACE) if os.path.isdir(os.path.join(WORKSPACE, d)) and not d.startswith('.')]
             lista = ', '.join(proyectos) if proyectos else 'ninguno'
-            return f"Señor, no encontré un proyecto que coincida con '{nombre}'. Proyectos disponibles: {lista}."
+            return f"SeÃ±or, no encontrÃ© un proyecto que coincida con '{nombre}'. Proyectos disponibles: {lista}."
 
         proyecto = candidatos[0]  # tomamos el mejor match
         self.active_project = proyecto
         _save_session(proyecto)
-        print(f"[Jarvis Developer] 📂 Proyecto cargado manualmente: '{proyecto}'")
-        return f"Señor, cargué el proyecto '{proyecto}'. A partir de ahora trabajaré sobre ese archivo."
+        print(f"[Jarvis Developer] ðŸ“‚ Proyecto cargado manualmente: '{proyecto}'")
+        return f"SeÃ±or, carguÃ© el proyecto '{proyecto}'. A partir de ahora trabajarÃ© sobre ese archivo."
 
 
 dev_jarvis = JarvisDeveloper()
