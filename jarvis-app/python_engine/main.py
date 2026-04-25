@@ -305,40 +305,42 @@ async def process_query(req: UserQuery):
         result = dev_jarvis.load_project_by_name(nombre_proyecto)
         return {"status": "success", "data": {"action": "reply", "message": result}}
 
-    # --- 1. MODO EDICIÓN (trabaja sobre el proyecto activo) ---
+    # --- 1. CREAR ARCHIVO NUEVO en el proyecto activo ---
+    triggers_nuevo_archivo = [
+        "crea un archivo", "creá un archivo", "crea el archivo",
+        "nuevo archivo", "nueva pagina", "nueva página",
+        "crear pagina", "crear página", "agregar pagina", "agregar página",
+        "haceme un archivo", "generame un archivo"
+    ]
+    es_nuevo_archivo = dev_jarvis.active_project and any(w in low for w in triggers_nuevo_archivo)
+
+    if es_nuevo_archivo:
+        print(f"[Jarvis Logic] 📄 NUEVO ARCHIVO en proyecto '{dev_jarvis.active_project}'.")
+        result = await dev_jarvis.create_new_file(user_text)
+        return {"status": "success", "data": {"action": "reply", "message": result}}
+
+    # --- 2. EDITAR el proyecto activo (solo triggers específicos de edición) ---
     triggers_edicion = [
         "modificá", "modifica", "cambiá", "cambia ", "agregá", "agrega ",
         "quitá", "quita ", "sacá", "saca ", "eliminá", "elimina", "elimines",
-        "poné", "pon ", "actualizá", "actualiza", "seguí trabajando", "sigue trabajando",
         "editá", "edita ", "mejorá", "mejora", "arreglá", "arregla",
         "reemplazá", "reemplaza", "borrá", "borra ", "añadí", "añade",
-        "cambia el color", "cambiá el color",
-        # Nuevas variantes:
-        "separá", "separa ", "separar", "dividí", "divide", "creá", "crea ",
-        "hacé", "haz ", "convertí", "convierte", "mové", "mové", "renombrá",
-        "quiero que", "necesito que", "podés", "podes "
+        "cambia el color", "cambiá el color", "separá", "separa ", "dividí",
+        "actualizá", "actualiza", "seguí trabajando", "sigue trabajando",
     ]
     es_edicion = dev_jarvis.active_project and any(w in low for w in triggers_edicion)
 
     if es_edicion:
-        print(f"[Jarvis Logic] ✏️ MODO EDICIÓN: modificando proyecto '{dev_jarvis.active_project}'.")
+        print(f"[Jarvis Logic] ✏️ EDICION: modificando '{dev_jarvis.active_project}'.")
         result = await dev_jarvis.edit_project(user_text)
         return {"status": "success", "data": {"action": "reply", "message": result}}
 
-    # --- 2. EL COMANDO MAESTRO (NUEVO PROYECTO) ---
+    # --- 3. NUEVO PROYECTO COMPLETO ---
     es_pedido_codigo = "quiero que programes" in low or "codeame" in low or "programá esto" in low
 
     if es_pedido_codigo:
-        print(f"[Jarvis Logic] 🚨 PRIORIDAD ALTA: Entrando en modo Programador por orden directa.")
+        print(f"[Jarvis Logic] 🚨 NUEVO PROYECTO: ejecutando motor de desarrollo.")
         result = await dev_jarvis.execute_full_project(user_text)
-        return {"status": "success", "data": {"action": "reply", "message": result}}
-
-    # --- 3. FALLBACK DE PROGRAMADOR ---
-    # Si hay proyecto activo y el mensaje llegó hasta acá sin matchear nada,
-    # lo tratamos como edición para evitar que Llama lo rechace.
-    if dev_jarvis.active_project:
-        print(f"[Jarvis Logic] 🔄 FALLBACK: tratando como edición de '{dev_jarvis.active_project}'.")
-        result = await dev_jarvis.edit_project(user_text)
         return {"status": "success", "data": {"action": "reply", "message": result}}
 
     contexto = ""
