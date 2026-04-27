@@ -343,10 +343,59 @@ async def process_query(req: UserQuery):
         result = await dev_jarvis.execute_full_project(user_text)
         return {"status": "success", "data": {"action": "reply", "message": result}}
 
-    contexto = ""
-    # Clasificación por intención
-    es_dinero = any(w in low for w in ['dolar', 'blue', 'mep', 'tarjeta', 'bitcoin', 'btc', 'cripto', 'eth', 'solana', 'xrp', 'tether'])
-    es_futbol = any(w in low for w in ['juega', 'partido', 'fixture', 'vs', 'enfrenta', 'cómo salió', 'resultado'])
+    # --- PRIORIDAD 0: DEPORTES Y FINANZAS (SIEMPRE ANTES QUE CUALQUIER MODO) ---
+    es_dinero = any(w in low for w in [
+        'dolar', 'blue', 'mep', 'tarjeta', 'bitcoin', 'btc', 'cripto',
+        'eth', 'solana', 'xrp', 'tether', 'binance', 'cripto', 'precio usdt'
+    ])
+    es_futbol = any(w in low for w in [
+        'juega', 'partido', 'fixture', 'vs ', ' vs', 'enfrenta', 'resultado',
+        'salio', 'salió', 'como le fue', 'como quedó', 'como quedo',
+        'goles', 'marcador', 'score', 'empate', 'ganó', 'gano', 'perdió', 'perdio',
+        'boca', 'river', 'racing', 'independiente', 'san lorenzo', 'huracan',
+        'belgrano', 'talleres', 'estudiantes', 'velez', 'lanus', 'arsenal',
+        'champions', 'libertadores', 'sudamericana', 'liga profesional',
+        'premier', 'laliga', 'serie a', 'bundesliga'
+    ])
+
+    if es_dinero:
+        print("[Jarvis Logic] 💰 FINANZAS detectadas, bypass total al motor financiero.")
+        contexto = get_financial_snapshot()
+        prompt_synthesis = f"""Eres Jarvis, asistente ejecutivo. AÑO: 2026. Fecha: {ahora_str}.
+CONTEXTO FINANCIERO:\n{contexto}\nPREGUNTA: {req.query}\nResponde directo con los datos."""
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                res = await client.post("http://127.0.0.1:11434/api/generate",
+                    json={"model": "llama3.1:latest", "prompt": prompt_synthesis, "stream": False,
+                          "options": {"temperature": 0.3, "num_predict": 400}})
+                return {"status": "success", "data": {"action": "reply",
+                        "message": res.json().get("response", "Sin datos financieros.").strip()}}
+        except Exception as e:
+            return {"status": "success", "data": {"action": "reply", "message": f"Error financiero: {e}"}}
+
+    if es_futbol:
+        print("[Jarvis Logic] ⚽ DEPORTES detectados, bypass al motor deportivo.")
+        contexto_deportivo = await get_sports_universal(low)
+        prompt_synthesis = f"""Eres Jarvis, asistente ejecutivo de Rodrigo. AÑO: 2026. Fecha: {ahora_str}.
+CONTEXTO DEPORTIVO (ÚNICA VERDAD):\n{contexto_deportivo}\n
+PREGUNTA: {req.query}\n
+INSTRUCCIONES:
+1. Si pregunta "cómo salió" o "resultado", informá el marcador final del último partido.
+2. Si pregunta "cuándo juega", informá la fecha del próximo partido.
+3. Respondé directo, sin excusas. Estilo argentino."""
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                res = await client.post("http://127.0.0.1:11434/api/generate",
+                    json={"model": "llama3.1:latest", "prompt": prompt_synthesis, "stream": False,
+                          "options": {"temperature": 0.3, "num_predict": 400}})
+                return {"status": "success", "data": {"action": "reply",
+                        "message": res.json().get("response", "Sin datos deportivos.").strip()}}
+        except Exception as e:
+            return {"status": "success", "data": {"action": "reply", "message": f"Error deportivo: {e}"}}
+    # ──────────────────────────────────────────────────────────────────────────
+
+    es_dinero = False  # ya procesado arriba
+    es_futbol = False  # ya procesado arriba
 
     if es_dinero:
         contexto = get_financial_snapshot()

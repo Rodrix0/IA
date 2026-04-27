@@ -196,21 +196,31 @@ io.on('connection', (socket) => {
                 }
             }
             else {
-                // === INTERCEPTOR DE MODO PROGRAMADOR ===
                 const lowerText = text.toLowerCase();
                 const activeMode = modeService.getActiveMode();
 
-                // Si el MODO PROGRAMADOR está activo, TODO va a Python (sin keywords)
-                const esModoActivado = activeMode && activeMode.id === 'programador';
+                // === MODO FUTBOL (toggle, igual que Programador) ===
+                if (activeMode && activeMode.id === 'futbol') {
+                    console.log(`[Jarvis Server] ⚽ MODO FUTBOL activo: buscando con Puppeteer.`);
+                    try {
+                        const { searchSports } = require('./services/aiService');
+                        const respuesta = await searchSports(text);
+                        responseText = respuesta || "No reconoci el equipo. Escribi el nombre completo (ej: 'Boca Juniors', 'Real Madrid').";
+                    } catch (e) {
+                        console.error("[Futbol] Error:", e.message);
+                        responseText = "Hubo un problema buscando el partido. Intenta de nuevo.";
+                    }
+                }
 
-                // Triggers por keywords (funcionan en CUALQUIER modo)
+                // === MODO PROGRAMADOR ===
+                else {
+                const esModoActivado = activeMode && activeMode.id === 'programador';
                 const esCodigo = lowerText.includes("quiero que programes") ||
                                  lowerText.includes("programá esto") ||
                                  lowerText.includes("codeame") ||
                                  text.length > 300;
                 const esCarga = /carg[aá] el proyecto|cargar proyecto|continu[aá] con|segu[ií] con|trabajá sobre/.test(lowerText);
-                const esEdicion = /modificá|modifica|cambiá|cambia |agregá|agrega |quitá|quita |sacá|saca |eliminá|elimina|elimines|elimin[aá]|poné|pon |actualizá|actualiza|seguí trabajando|sigue trabajando|editá|edita |mejorá|mejora|arreglá|arregla|reemplaz[aá]|borrá|borra |añad[ií]|añade/.test(lowerText);
-
+                const esEdicion = /modificá|modifica|cambiá|cambia |agregá|agrega |quitá|quita |sacá|saca |eliminá|elimina|elimines|elimin[aá]|actualizá|actualiza|seguí trabajando|sigue trabajando|editá|edita |mejorá|mejora|arreglá|arregla|reemplaz[aá]|borrá|borra |añad[ií]|añade/.test(lowerText);
                 const esModoPrograma = esModoActivado || esCodigo || esCarga || esEdicion;
 
 
@@ -256,6 +266,7 @@ io.on('connection', (socket) => {
                         responseText = await aiService.getAIResponse(text, activeMode, screenContext);
                     }
                 }
+                } // fin else (interceptor programador)
             }
 
         } catch (error) {

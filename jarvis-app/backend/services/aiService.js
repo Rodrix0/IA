@@ -253,26 +253,143 @@ function recoverToolIntentFromModelContent(rawContent, userText = '') {
 }
 
 async function performInvisibleSearch(query, maxLength = 3000) {
-    console.log(`\n[Agente Araña] 🕸️ Delegando búsqueda a Super Search Python: "${query}"...`);
+    console.log(`\n[Agente Araña] 🕸️ Infiltrando de forma dual (Bing Vivo + DuckDuckGo Info) para: "${query}"...`);
     try {
-        const url = "http://127.0.0.1:8000/super_search";
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query })
-        });
-        const data = await response.json();
-        const text = data.result || "No hay información.";
-        return text.substring(0, maxLength);
+        const headersBing = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0 Safari/537.36',
+            'Accept-Language': 'es-ES,es;q=0.9'
+        };
+        const headersDuck = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        };
+
+        // Búsquedas Concurrentes
+        const [resBing, resDuck] = await Promise.all([
+            fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}`, { headers: headersBing }).catch(() => null),
+            fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { headers: headersDuck }).catch(() => null)
+        ]);
+
+        let combinedText = "";
+
+        // Procesar Bing (Resultados y Widgets en Vivo)
+        if (resBing && resBing.ok) {
+            const htmlBing = await resBing.text();
+            const $1 = cheerio.load(htmlBing);
+            $1('script, style, noscript, header, footer, svg, img, button').remove();
+            let textBing = $1('#b_results').text() || "";
+            textBing = textBing.replace(/\s+/g, ' ').trim();
+            if (textBing) combinedText += `[DATOS CLAVE Y EVENTOS EN VIVO]: ${textBing.substring(0, maxLength / 2)}\n\n`;
+        }
+
+        // Procesar DuckDuckGo (Definiciones e Información)
+        if (resDuck && resDuck.ok) {
+            const htmlDuck = await resDuck.text();
+            const $2 = cheerio.load(htmlDuck);
+            $2('script, style, noscript, header, footer, svg, img, button').remove();
+            let textDuck = $2('.result__snippet').text() || "";
+            textDuck = textDuck.replace(/\s+/g, ' ').trim();
+            if (textDuck) combinedText += `[DEFINICIONES E INFORMACIÓN WIKIPEDIA]: ${textDuck.substring(0, maxLength / 2)}`;
+        }
+        
+        if (!combinedText.trim()) {
+            console.log("\n[Modo Infiltración] 🕵️‍♂️ Búsqueda estándar bloqueada. Lanzando Obscura para evasión avanzada con renderizado de JS...");
+            return await runObscuraInfiltration(query, maxLength);
+        }
+        return combinedText;
     } catch (e) {
-        console.error("Error al conectar con Super Search en Python:", e.message);
+        console.error("Error al romper la seguridad de búsqueda:", e.message);
         return "Fallo de conexión al raspar la web.";
     }
 }
 
-async function executeLlamaChat(messages, tools = null, jsonFormat = false) {
+async function runObscuraInfiltration(query, maxLength) {
+    try {
+        const puppeteer = require('puppeteer');
+        console.log("[Navegador Stealth] Desplegando Puppeteer nativo evasivo...");
+        const browser = await puppeteer.launch({
+            headless: "new",
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-extensions',
+                '--window-size=1920,1080'
+            ]
+        });
+        const page = await browser.newPage();
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        await page.setViewport({ width: 1920, height: 1080 });
+        console.log(`[Navegador Stealth] Navegando a Bing Full JS (ideal para DEPORTES) por: "${query}"...`);
+        await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`, { waitUntil: 'networkidle2' });
+        const results = await page.evaluate(() => {
+            const snippets = Array.from(document.querySelectorAll('.b_algo, .b_ans, .b_widget, .ws_sport'));
+            return snippets.map(s => s.innerText).join('\n---\n');
+        });
+        await browser.close();
+        if (results.trim()) {
+            console.log("[Navegador Stealth] Infiltracion nativa exitosa. Datos de JS extraidos.");
+            return `[DATOS DEPORTIVOS EN VIVO]:\n${results.substring(0, maxLength)}`;
+        } else {
+            return "Sin resultados en Bing para esa busqueda.";
+        }
+    } catch (err) {
+        console.error("[Navegador Stealth] Fallo:", err.message);
+        return `Error al raspar la web: ${err.message}`;
+    }
+}
+
+// ── FUNCION EXPORTABLE: busqueda deportiva directa sin pasar por Python ──────
+const EQUIPOS_TODOS = [
+    // Argentina
+    'boca','river','racing','independiente','san lorenzo','huracan',
+    'belgrano','talleres','estudiantes','velez','lanus','godoy cruz',
+    'banfield','tigre','colon','union','newells','rosario central',
+    // Internacional
+    'real madrid','barcelona','atletico de madrid','atletico madrid',
+    'manchester city','manchester united','liverpool','chelsea','arsenal',
+    'juventus','inter','milan','napoli','psg','lyon','porto','benfica',
+    'bayern','borussia','ajax','atletico'
+];
+
+async function searchSports(userText) {
+    const low = userText.toLowerCase();
+    const equipo = EQUIPOS_TODOS.find(e => low.includes(e));
+    if (!equipo) return null; // no es una pregunta de equipo conocido
+
+    const esResultado = /ultimo|último|sali[oó]|result|como le fue|qued[oó]|marc|gol/.test(low);
+    const esProximo  = /cuando|cuándo|proximo|próximo|juega|enfrenta|siguiente/.test(low);
+
+    let query;
+    if (esResultado) {
+        query = `${equipo} resultado ultimo partido`;
+    } else if (esProximo) {
+        query = `${equipo} proximo partido fecha hora`;
+    } else {
+        query = `${equipo} resultado partido hoy`;
+    }
+
+    console.log(`[Futbol Directo] Equipo: "${equipo}" | Query: "${query}"`);
+    const scrapedData = await runObscuraInfiltration(query, 3500);
+
+    const prompt = `El usuario preguntó: "${userText}".
+
+Datos extraídos de Bing en tiempo real:
+${scrapedData}
+
+Respondé directamente con el resultado o fecha del partido. Formato: Equipo A X - Y Equipo B (fecha). Sin explicar cómo buscaste.`;
+
+    const aiMsg = await executeLlamaChat([{ role: 'user', content: prompt }], null, false);
+    return typeof aiMsg.content === 'string' ? aiMsg.content : JSON.stringify(aiMsg.content);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+async function executeLlamaChat(messages, tools = null, jsonFormat = false, overrideModel = 'llama3.1:latest') {
     const payload = {
-        model: 'llama3.1:latest',
+        model: overrideModel,
         messages: messages,
         stream: false
     };
@@ -376,7 +493,7 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
             console.error("[Code-Act] No se pudieron cargar habilidades dinámicas de Python:", e.message);
         }
 
-        let llamaResponse = await executeLlamaChat(messages, tools, false);
+        let llamaResponse = await executeLlamaChat(messages, tools, false, activeMode ? activeMode.model || 'llama3.1:latest' : 'llama3.1:latest');
         
         // Emulamos el intent structure legacy para no quebrar el resto del código
         let intent = {
@@ -510,7 +627,52 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                 
                 // data.data is our router JSON response
                 const sysServices = require('./systemService');
-                intent.reply = await sysServices.handlePythonRouterDecision(data.data);
+                const pyReply = await sysServices.handlePythonRouterDecision(data.data);
+                
+                // Si el Agente Python (LlamaIndex) se rinde y dice que no puede ver datos en vivo de deportes
+                if (/no\s+puedo\s+proporcionar|lo\s+siento|no\s+tengo\s+acceso\s+en\s+tiempo|i\s+cannot\s+provide|no\s+puedo\s+ofrecer/i.test(pyReply)) {
+                    console.log("[Node Router] Agente Python se rindió por bloqueos. Levantando Infiltración Nativa JS Stealth...");
+                    
+                    // ── Construir query deportiva inteligente ────────────────
+                    const EQUIPOS_ARG = ['boca','river','racing','independiente','san lorenzo',
+                        'huracan','belgrano','talleres','estudiantes','velez','lanus'];
+                    const EQUIPOS_INTER = ['real madrid','barcelona','manchester','liverpool',
+                        'juventus','psg','bayern','atletico'];
+                    
+                    const userLow = userText.toLowerCase();
+                    let equipoDetectado = [...EQUIPOS_ARG, ...EQUIPOS_INTER].find(e => userLow.includes(e));
+                    
+                    let queryToSearch;
+                    if (equipoDetectado) {
+                        // Query específica para resultados de fútbol
+                        const esUltimo = /ultimo|último|salió|salio|resultado|como le fue|quedo|quedó/.test(userLow);
+                        const esProximo = /cuando|cuándo|proximo|próximo|juega|enfrenta/.test(userLow);
+                        if (esUltimo) {
+                            queryToSearch = `${equipoDetectado} resultado ultimo partido hoy 2025`;
+                        } else if (esProximo) {
+                            queryToSearch = `${equipoDetectado} proximo partido fecha hora`;
+                        } else {
+                            queryToSearch = `${equipoDetectado} resultado partido hoy`;
+                        }
+                    } else {
+                        queryToSearch = intent.target && intent.target !== 'general' 
+                            ? intent.target 
+                            : userText;
+                    }
+                    
+                    console.log(`[Agente Araña] Query construida: "${queryToSearch}"`);
+                    const scrapedData = await runObscuraInfiltration(queryToSearch, 3500);
+                    // ────────────────────────────────────────────────────────
+                    
+                    const stealthPrompt = `El usuario preguntó: "${userText}".\n\nDatos extraídos de Bing en tiempo real:\n\n${scrapedData}\n\nRespondé directamente con el resultado del partido (marcador, equipos, fecha). Sin explicar cómo lo buscaste.`;
+                    
+                    const subAiMsg = await executeLlamaChat([{ role: "user", content: stealthPrompt }], null, false);
+                    intent.reply = typeof subAiMsg.content === 'string' ? subAiMsg.content : JSON.stringify(subAiMsg.content);
+
+                    
+                } else {
+                    intent.reply = pyReply;
+                }
             } else {
                 intent.reply = "Error: Mi sistema central en Python (LlamaIndex) devolvi� status " + fetchReq.status;
                 intent.action = "chat";
@@ -735,7 +897,7 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                         headers: { 'Content-Type': 'application/json' },
                         dispatcher: new (require('undici').Agent)({ headersTimeout: 30 * 60 * 1000 }), // 30 Minutos Timeout
                         body: JSON.stringify({ 
-                            model: 'llama3.1:latest', 
+                            model: activeMode ? activeMode.model || 'llama3.1:latest' : 'llama3.1:latest', 
                             prompt: rawLlama3Prompt, 
                             raw: true, // CLAVE: Llama 3 directo al formato
                             stream: false,
@@ -855,7 +1017,7 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            model: 'llama3.1:latest', 
+                            model: activeMode ? activeMode.model || 'llama3.1:latest' : 'llama3.1:latest', 
                             prompt: pPrompt,
                             stream: false
                         })
@@ -986,6 +1148,8 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
     }
 }
 
+
 module.exports = {
-    getAIResponse
+    getAIResponse,
+    searchSports
 };
