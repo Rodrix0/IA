@@ -323,10 +323,19 @@ async function runObscuraInfiltration(query, maxLength) {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
         await page.setViewport({ width: 1920, height: 1080 });
         console.log(`[Navegador Stealth] Navegando a Bing Full JS (ideal para DEPORTES) por: "${query}"...`);
-        await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(query)}`, { waitUntil: 'networkidle2' });
+        // Locale es-AR para resultados en español + Argentina
+        await page.goto(
+            `https://www.bing.com/search?q=${encodeURIComponent(query)}&mkt=es-AR&setlang=es`,
+            { waitUntil: 'networkidle2', timeout: 30000 }
+        );
+        // Espera extra: los widgets de deportes de Bing cargan en JS lazy después del networkidle
+        await new Promise(r => setTimeout(r, 2500));
         const results = await page.evaluate(() => {
-            const snippets = Array.from(document.querySelectorAll('.b_algo, .b_ans, .b_widget, .ws_sport'));
-            return snippets.map(s => s.innerText).join('\n---\n');
+            // Priorizar widgets de deportes, luego resultados generales
+            const sports = Array.from(document.querySelectorAll('.b_widget, .ws_sport, .b_ans'));
+            const general = Array.from(document.querySelectorAll('.b_algo'));
+            const all = sports.length > 0 ? sports : general;
+            return all.map(s => s.innerText).join('\n---\n');
         });
         await browser.close();
         if (results.trim()) {
@@ -357,29 +366,41 @@ const EQUIPOS_TODOS = [
 async function searchSports(userText) {
     const low = userText.toLowerCase();
     const equipo = EQUIPOS_TODOS.find(e => low.includes(e));
-    if (!equipo) return null; // no es una pregunta de equipo conocido
+    if (!equipo) return null;
 
-    const esResultado = /ultimo|último|sali[oó]|result|como le fue|qued[oó]|marc|gol/.test(low);
-    const esProximo  = /cuando|cuándo|proximo|próximo|juega|enfrenta|siguiente/.test(low);
+    const ahora        = new Date();
+    const anioActual   = ahora.getFullYear();
+    const mesActual    = ahora.toLocaleDateString('es-AR', { month: 'long' }); // "abril"
+    const fechaCorta   = ahora.toLocaleDateString('es-AR', { day:'numeric', month:'long', year:'numeric' }); // "27 de abril de 2026"
+
+    const esResultado = /ultimo|último|sali[oó]|result|como le fue|qued[oó]|marc|gol|jugo|jugó/.test(low);
+    const esProximo   = /cuando|cuándo|proximo|próximo|juega|enfrenta|siguiente|va a jugar/.test(low);
 
     let query;
     if (esResultado) {
-        query = `${equipo} resultado ultimo partido`;
+        query = `${equipo} resultado ultimo partido ${mesActual} ${anioActual}`;
     } else if (esProximo) {
-        query = `${equipo} proximo partido fecha hora`;
+        query = `${equipo} proximo partido ${mesActual} ${anioActual} fecha hora estadio`;
     } else {
-        query = `${equipo} resultado partido hoy`;
+        query = `${equipo} partido ${mesActual} ${anioActual}`;
     }
 
     console.log(`[Futbol Directo] Equipo: "${equipo}" | Query: "${query}"`);
-    const scrapedData = await runObscuraInfiltration(query, 3500);
+    const scrapedData = await runObscuraInfiltration(query, 4000);
 
-    const prompt = `El usuario preguntó: "${userText}".
+    // Prompt simple: extraer y reportar, sin razonar sobre fechas
+    const prompt = `HOY es ${fechaCorta}.
+El usuario preguntó: "${userText}".
 
-Datos extraídos de Bing en tiempo real:
+Datos de Bing:
+---
 ${scrapedData}
+---
 
-Respondé directamente con el resultado o fecha del partido. Formato: Equipo A X - Y Equipo B (fecha). Sin explicar cómo buscaste.`;
+TAREA: Leé los datos y respondé la pregunta en 1-2 oraciones.
+- Si pregunta el próximo partido: decí cuándo y contra quién (día, hora, estadio si está).
+- Si pregunta resultado: decí el marcador y la fecha.
+- Usá SOLO lo que dice el texto. No agregues nada extra.`;
 
     const aiMsg = await executeLlamaChat([{ role: 'user', content: prompt }], null, false);
     return typeof aiMsg.content === 'string' ? aiMsg.content : JSON.stringify(aiMsg.content);
@@ -662,13 +683,22 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
                     
                     console.log(`[Agente Araña] Query construida: "${queryToSearch}"`);
                     const scrapedData = await runObscuraInfiltration(queryToSearch, 3500);
-                    // ────────────────────────────────────────────────────────
-                    
-                    const stealthPrompt = `El usuario preguntó: "${userText}".\n\nDatos extraídos de Bing en tiempo real:\n\n${scrapedData}\n\nRespondé directamente con el resultado del partido (marcador, equipos, fecha). Sin explicar cómo lo buscaste.`;
+
+                    // Prompt general (no deportes) — responde la pregunta del usuario con los datos raspados
+                    const fechaHoy = new Date().toLocaleDateString('es-AR', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+                    const stealthPrompt = `Sos Jarvis, asistente de Rodrigo. HOY: ${fechaHoy}.
+
+El usuario preguntó: "${userText}".
+
+Datos obtenidos de Bing:
+---
+${scrapedData}
+---
+
+Responde la pregunta del usuario usando esos datos. Sé directo y conciso. No menciones cómo obtuviste los datos.`;
                     
                     const subAiMsg = await executeLlamaChat([{ role: "user", content: stealthPrompt }], null, false);
                     intent.reply = typeof subAiMsg.content === 'string' ? subAiMsg.content : JSON.stringify(subAiMsg.content);
-
                     
                 } else {
                     intent.reply = pyReply;
@@ -1003,6 +1033,18 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
             }
 
             if (intent.action === "generate_prompt") {
+                // Guard: solo crear documento si el usuario lo pidió EXPLÍCITAMENTE
+                // Preguntas simples como "que es X" no deben crear archivos
+                const esPregunStaSimple = /^(que\s+es|qué\s+es|quien\s+es|quién\s+es|como\s+funciona|cómo\s+funciona|definicion\s+de|qué\s+significa|que\s+significa|explicame|explica|contame|cuéntame|cuéntame)/i.test(userText.trim());
+                if (esPregunStaSimple) {
+                    // Redirigir a chat normal en vez de crear archivo
+                    console.log(`[Jarvis] Pregunta simple detectada, respondiendo sin crear documento.`);
+                    const chatMsg = await executeLlamaChat([
+                        { role: 'system', content: activeMode ? activeMode.prompt : 'Eres Jarvis, asistente directo y conciso.' },
+                        { role: 'user', content: userText }
+                    ], null, false);
+                    return typeof chatMsg.content === 'string' ? chatMsg.content : JSON.stringify(chatMsg.content);
+                }
                 const fs = require('fs');
                 const path = require('path');
                 const { exec } = require('child_process');
