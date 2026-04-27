@@ -218,6 +218,16 @@ io.on('connection', (socket) => {
                 const esCodigo = lowerText.includes("quiero que programes") ||
                                  lowerText.includes("programá esto") ||
                                  lowerText.includes("codeame") ||
+                                 lowerText.includes("pagina web") ||
+                                 lowerText.includes("página web") ||
+                                 lowerText.includes("sitio web") ||
+                                 lowerText.includes("web de") ||
+                                 lowerText.includes("proyecto web") ||
+                                 lowerText.includes("crea una web") ||
+                                 lowerText.includes("hazme una web") ||
+                                 (lowerText.includes("crea") && lowerText.includes("web")) ||
+                                 (lowerText.includes("haz") && lowerText.includes("pagina")) ||
+                                 (lowerText.includes("crear") && lowerText.includes("html")) ||
                                  text.length > 300;
                 const esCarga = /carg[aá] el proyecto|cargar proyecto|continu[aá] con|segu[ií] con|trabajá sobre/.test(lowerText);
                 const esEdicion = /modificá|modifica|cambiá|cambia |agregá|agrega |quitá|quita |sacá|saca |eliminá|elimina|elimines|elimin[aá]|actualizá|actualiza|seguí trabajando|sigue trabajando|editá|edita |mejorá|mejora|arreglá|arregla|reemplaz[aá]|borrá|borra |añad[ií]|añade/.test(lowerText);

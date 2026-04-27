@@ -305,6 +305,28 @@ async def process_query(req: UserQuery):
         result = dev_jarvis.load_project_by_name(nombre_proyecto)
         return {"status": "success", "data": {"action": "reply", "message": result}}
 
+    # --- 0b. INSTALAR DESIGN.md (solo si NO hay intención de crear proyecto) ---
+    from developer_service import install_design, resolve_design_id, DESIGNS_CATALOG
+    _dm = _re.search(r'(?:instal[aá]|pon[eé]|us[aá]|aplic[aá])\s+(?:el\s+)?(?:dise[nñ]o|estilo|design|tema)\s+(.+)', low)
+    _tiene_creacion = any(w in low for w in [
+        "programa", "crea", "hazme", "haz ", "pagina", "página", "web",
+        "proyecto", "nuevo", "sitio", "app", "landing", "usalo"
+    ])
+    if _dm and dev_jarvis.active_project and not _tiene_creacion:
+        keyword = _dm.group(1).strip()
+        import os as _os
+        p_path = _os.path.join(dev_jarvis.WORKSPACE if hasattr(dev_jarvis, 'WORKSPACE') else
+                               _os.path.join(_os.path.expanduser("~"), "Desktop", "Jarvis_Projects"),
+                               dev_jarvis.active_project)
+        design_id = DESIGNS_CATALOG.get(keyword) or resolve_design_id(keyword)
+        if design_id:
+            result = install_design(design_id, p_path)
+        else:
+            lista = ", ".join(sorted(DESIGNS_CATALOG.keys())[:20])
+            result = f"No encontre el diseno '{keyword}'. Disponibles: {lista}..."
+        return {"status": "success", "data": {"action": "reply", "message": result}}
+    # Si _tiene_creacion → el design_id se detecta dentro de execute_full_project via resolve_design_id
+
     # --- 1. CREAR ARCHIVO NUEVO en el proyecto activo ---
     triggers_nuevo_archivo = [
         "crea un archivo", "creá un archivo", "crea el archivo",
@@ -336,7 +358,24 @@ async def process_query(req: UserQuery):
         return {"status": "success", "data": {"action": "reply", "message": result}}
 
     # --- 3. NUEVO PROYECTO COMPLETO ---
-    es_pedido_codigo = "quiero que programes" in low or "codeame" in low or "programá esto" in low
+    triggers_nuevo_proyecto = [
+        # Formas directas
+        "quiero que programes", "codeame", "programá esto",
+        # Formas naturales (lo que el usuario realmente dice)
+        "hazme una pagina", "hazme una página", "haceme una pagina", "haceme una página",
+        "hazme un sitio", "hazme una web", "haceme una web", "haceme un sitio",
+        "crea una pagina", "crea una página", "crea un sitio", "crea una web",
+        "generame una pagina", "generame una página", "generame un sitio", "generame una web",
+        "necesito una pagina", "necesito una página", "necesito un sitio", "necesito una web",
+        "programa una pagina", "programa una página", "programa un sitio", "programa una web",
+        "programa la pagina", "programa la página",
+        "hace una pagina", "hace una página", "hace una web",
+        "quiero una pagina", "quiero una página", "quiero un sitio", "quiero una web",
+        "desarrolla", "desarrollame",
+        # Con diseño explícito (tema + proyecto)
+        "usa el tema", "usá el tema", "usa el diseño", "usá el diseño",
+    ]
+    es_pedido_codigo = any(t in low for t in triggers_nuevo_proyecto)
 
     if es_pedido_codigo:
         print(f"[Jarvis Logic] 🚨 NUEVO PROYECTO: ejecutando motor de desarrollo.")
