@@ -11,6 +11,156 @@ if not os.path.exists(WORKSPACE):
 
 SESSION_FILE = os.path.join(WORKSPACE, ".jarvis_session.json")
 
+# ── DESIGN.md (design.md directory) ──────────────────────────────────────────
+DESIGNS_CATALOG = {
+    # Oscuros / Técnicos
+    "terminal":        "terminal",
+    "obsidian":        "obsidian",
+    "graphite":        "graphite",
+    "tokyo midnight":  "tokyo-midnight",
+    "neon arcade":     "neon-arcade",
+    "cyberpunk":       "cyberpunk-city",
+    "cyber matrix":    "cyber-matrix",
+    "zed":             "zed-dev",
+    # Café / Restaurante
+    "cafe":            "linen",
+    "cafeteria":       "linen",
+    "restaurant":      "wine-country",
+    "bistro":          "old-money",
+    # Corporativo / Finanzas
+    "stripe":          "stripe-gradient",
+    "finanzas":        "wealth-noir",
+    "banco":           "neobank-mint",
+    "corporativo":     "swiss-grid",
+    "cobalt":          "cobalt-product",
+    # Editorial / Revista
+    "magazine":        "magazine-rouge",
+    "periodico":       "broadsheet-01",
+    "editorial":       "sunset-magazine",
+    "typewriter":      "typewriter",
+    # Minimal / Limpio
+    "minimal":         "paper-white",
+    "notion":          "notion-beige",
+    "vercel":          "vercel-ink",
+    "arctic":          "arctic",
+    # Playful / Bold
+    "bauhaus":         "bauhaus",
+    "y2k":             "y2k-chrome",
+    "candy":           "candy-shop",
+    "pastel":          "pastel-candy",
+    # Naturaleza / Organico
+    "matcha":          "matcha",
+    "botanico":        "botanical",
+    "forest":          "forest-floor",
+    # Deportes / Gaming
+    "sports":          "sports-hud",
+    "arcade":          "arcade-neon-pop",
+    "pixel":           "pixel-quest",
+    "dungeon":         "dungeon-crawl",
+    # Moda / Arte
+    "moda":            "atelier-noir",
+    "galeria":         "gallery-white",
+    "streetwear":      "streetwear-block",
+    # Musica
+    "musica":          "record-sleeve",
+    "rave":            "rave-poster",
+    # Salud
+    "clinica":         "clinic-sage",
+    "wellness":        "wellness-coral",
+    # IA / Dev
+    "ai":              "ai-labs",
+    "devops":          "devops-graphite",
+}
+
+def install_design(design_id: str, project_path: str) -> str:
+    """Instala un DESIGN.md en la carpeta del proyecto via npx designdotmd add."""
+    try:
+        # Crear carpeta si no existe (necesario para que npx pueda escribir ahi)
+        if not os.path.exists(project_path):
+            os.makedirs(project_path)
+
+        # shell=True es obligatorio en Windows para encontrar npx en el PATH
+        cmd = f'npx -y designdotmd add {design_id}'
+        print(f"[Design.md] Ejecutando: {cmd} en {project_path}")
+        result = subprocess.run(
+            cmd,
+            cwd=project_path,
+            capture_output=True, text=True, timeout=90,
+            shell=True
+        )
+        print(f"[Design.md] stdout: {result.stdout[:300]}")
+        if result.stderr:
+            print(f"[Design.md] stderr: {result.stderr[:300]}")
+
+        design_path = os.path.join(project_path, "DESIGN.md")
+        if os.path.exists(design_path):
+            print(f"[Design.md] Instalado correctamente: {design_id}")
+            return f"Diseno '{design_id}' instalado correctamente."
+        return f"No se genero DESIGN.md. Respuesta: {result.stdout or result.stderr}"
+    except Exception as e:
+        return f"Error ejecutando designdotmd: {e}"
+
+def read_design_md(project_path: str) -> str:
+    """Lee el DESIGN.md del proyecto si existe. Devuelve el contenido como contexto."""
+    design_path = os.path.join(project_path, "DESIGN.md")
+    if not os.path.exists(design_path):
+        return ""
+    try:
+        with open(design_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        # Limitamos a 6000 chars para no saturar el contexto del LLM
+        return content[:6000]
+    except Exception:
+        return ""
+
+def resolve_design_id(prompt_text: str) -> str:
+    """Intenta detectar el id del diseno mencionado en el prompt."""
+    low = prompt_text.lower()
+    for keyword, design_id in DESIGNS_CATALOG.items():
+        if keyword in low:
+            return design_id
+    return ""
+
+def parse_design_md_colors(design_content: str) -> dict:
+    """Extrae colores y tipografia del DESIGN.md para sobrescribir la paleta."""
+    import re as _re
+    colors = {}
+    fonts  = {}
+
+    # Extraer bloque de colores YAML-style
+    color_block = _re.search(r'colors:\s*\n(.*?)(?:\n\w|\Z)', design_content, _re.DOTALL)
+    if color_block:
+        for line in color_block.group(1).splitlines():
+            m = _re.match(r'\s+(\w[\w-]*):\s*["\']?(#[0-9a-fA-F]{3,8})["\']?', line)
+            if m:
+                colors[m.group(1)] = m.group(2)
+
+    # Extraer tipografia
+    font_block = _re.search(r'typography:.*?fontFamily:\s*(.+?)[\n,]', design_content, _re.DOTALL)
+    if font_block:
+        fonts['display'] = font_block.group(1).strip().strip('"\'')
+
+    if not colors:
+        return {}
+
+    # Mapear colores del DESIGN.md a las variables de paleta de Jarvis
+    # design.md usa: primary, secondary, tertiary, neutral, surface, on-primary
+    c = colors
+    return {
+        "accent":       c.get("tertiary",   c.get("primary",   "#C9A96E")),
+        "accent_light": c.get("primary",    c.get("secondary", "#E8C98A")),
+        "accent_dark":  c.get("secondary",  c.get("tertiary",  "#A07840")),
+        "bg":           c.get("neutral",    c.get("surface",   "#0D0D0D")),
+        "bg2":          c.get("surface",    "#1A1A1A"),
+        "bg3":          c.get("on-surface", "#252525"),
+        "text":         c.get("on-primary", c.get("primary",   "#F0EDE8")),
+        "text_muted":   c.get("secondary",  "#9A9087"),
+        "font_title":   fonts.get("display", "Inter"),
+        "font_body":    fonts.get("display", "Inter"),
+        "nombre":       "DESIGN.md",
+    }
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ── SESION ────────────────────────────────────────────────────────────────────
 def _save_session(project_name: str):
     with open(SESSION_FILE, "w", encoding="utf-8") as f:
@@ -515,7 +665,7 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 
 <section class="hero" id="inicio">
 
-  <div class="hero-badge">ÃÂ¢ÃÂÃ¢ÂÂ¢ Experiencia Premium de CafÃÂÃÂ©</div>
+  <div class="hero-badge">&#9733; Experiencia Premium de Caf&#233;</div>
 
   <h1>{project_title}</h1>
 
@@ -525,7 +675,7 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 
     <button class="btn-primary" onclick="document.getElementById('mesas').scrollIntoView({{behavior:'smooth'}})">Reservar Mesa</button>
 
-    <button class="btn-outline" onclick="document.getElementById('menu').scrollIntoView({{behavior:'smooth'}})">Ver MenÃÂÃÂº</button>
+    <button class="btn-outline" onclick="document.getElementById('menu').scrollIntoView({{behavior:'smooth'}})">Ver Men&#250;</button>
 
   </div>
 
@@ -541,7 +691,7 @@ PREMIUM_TEMPLATE = """<!DOCTYPE html>
 
   <div class="stat"><div class="stat-num">{menu_count}+</div><div class="stat-label">Especialidades</div></div>
 
-  <div class="stat"><div class="stat-num">4.9ÃÂ¢ÃÂÃ¢ÂÂ¦</div><div class="stat-label">CalificaciÃÂÃÂ³n</div></div>
+  <div class="stat"><div class="stat-num">4.9&#9733;</div><div class="stat-label">Calificaci&#243;n</div></div>
 
   <div class="stat"><div class="stat-num">15m</div><div class="stat-label">Tiempo promedio</div></div>
 
@@ -879,8 +1029,13 @@ ESTRUCTURA OBLIGATORIA:
             }
 
         data["_raw_prompt"] = big_prompt
-        palette_match = re.search(r'(?:paleta|estilo|colores?)\s+([\w\s]+?)(?:\.|,|$)', big_prompt.lower())
+        palette_match = re.search(r'(?:paleta|estilo|colores?|diseno|diseño)\s+([\w\s]+?)(?:\.|,|$)', big_prompt.lower())
         palette_override = palette_match.group(1).strip() if palette_match else None
+
+        # Auto-instalar DESIGN.md si el usuario menciona un diseño de design.md
+        design_id = resolve_design_id(big_prompt)
+        data["_design_id"] = design_id
+
         return self._deploy_to_windows(data, palette_override=palette_override)
 
     def _deploy_to_windows(self, data, palette_override=None):
@@ -898,6 +1053,21 @@ ESTRUCTURA OBLIGATORIA:
         p_path = os.path.join(WORKSPACE, p_name)
         if not os.path.exists(p_path):
             os.makedirs(p_path)
+
+        # ── Instalar DESIGN.md si fue pedido ────────────────────────────
+        design_id = data.get("_design_id", "")
+        if design_id:
+            print(f"[Jarvis Designer] Instalando DESIGN.md: {design_id}")
+            install_design(design_id, p_path)
+        design_context = read_design_md(p_path)
+
+        # Si hay DESIGN.md, sus colores sobrescriben la paleta por defecto
+        if design_context:
+            design_paleta = parse_design_md_colors(design_context)
+            if design_paleta:
+                paleta = design_paleta
+                print(f"[Jarvis Designer] Colores del DESIGN.md aplicados: accent={paleta['accent']} bg={paleta['bg']}")
+        # ────────────────────────────────────────────────────────────────
 
         html = PREMIUM_TEMPLATE.format(
             project_title=p_title,
@@ -926,18 +1096,24 @@ ESTRUCTURA OBLIGATORIA:
         except Exception:
             pass
 
-        return f"Senor, '{p_title}' desplegado con paleta '{paleta['nombre']}'. Navegador y VS Code abiertos."
+        design_msg = f" con diseno '{design_id}'" if design_id else ""
+        return f"Senor, '{p_title}' desplegado{design_msg} y paleta '{paleta['nombre']}'. Navegador y VS Code abiertos."
 
     async def edit_project(self, instruccion: str):
         """Edicion quirurgica: elimina con regex, agrega snippets nuevos."""
         if not self.active_project:
             return "Senor, no hay proyecto activo. Carga uno primero."
-        index_path = os.path.join(WORKSPACE, self.active_project, "index.html")
+        p_path = os.path.join(WORKSPACE, self.active_project)
+        index_path = os.path.join(p_path, "index.html")
         if not os.path.exists(index_path):
             return f"No encontre index.html en '{self.active_project}'."
 
         with open(index_path, "r", encoding="utf-8") as f:
             html = f.read()
+
+        # Leer DESIGN.md si existe (mejora la calidad de generacion)
+        design_context = read_design_md(p_path)
+        design_hint = f"\n\nDISEGNO ACTIVO (DESIGN.md):\n{design_context}" if design_context else ""
 
         low = instruccion.lower()
         acciones = []
@@ -965,7 +1141,7 @@ ESTRUCTURA OBLIGATORIA:
         if any(p in low for p in ["agrega", "agrega", "anade", "incluye", "pon ", "pone", "implementa"]):
             prompt = f"""Genera SOLO un bloque HTML (sin DOCTYPE ni html/head/body):
 PEDIDO: {instruccion}
-Usa variables CSS: --accent, --dark, --dark2, --dark3, --text, --text-muted.
+Usa variables CSS: --accent, --dark, --dark2, --dark3, --text, --text-muted.{design_hint}
 Devuelve UNICAMENTE el HTML del bloque."""
             try:
                 async with httpx.AsyncClient(timeout=90) as client:
