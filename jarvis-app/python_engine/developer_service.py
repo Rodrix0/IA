@@ -987,56 +987,114 @@ class JarvisDeveloper:
             print(f"[Jarvis Developer] Session recuperada: '{self.active_project}'")
 
     async def execute_full_project(self, big_prompt: str):
-        print("[Jarvis Architect] Generando proyecto premium...")
+        print("[Jarvis Architect] Generando proyecto con IA generativa...")
 
-        system_instructions = """Eres un Senior Developer. Responde SOLO con JSON puro, sin explicaciones.
-ESTRUCTURA OBLIGATORIA:
-{
-  "project_name": "nombre_corto_sin_espacios",
-  "project_title": "Nombre del Proyecto",
-  "hero_description": "Descripcion corta de 2 oraciones.",
-  "sections": ["inicio","menu","pedido","contacto"],
-  "menu": [
-    {"nombre": "Item", "descripcion": "Descripcion", "precio": 100, "emoji": "item"}
-  ]
-}"""
-
-        user_prompt = f"Genera el contenido JSON para este proyecto web:\n{big_prompt[:2000]}"
-
-        data = {}
-        try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                res = await client.post("http://127.0.0.1:11434/api/generate",
-                    json={"model": CODER_MODEL, "prompt": f"{system_instructions}\n\n{user_prompt}",
-                          "stream": False, "options": {"temperature": 0.1, "num_predict": 800}})
-                raw = res.json().get("response", "").strip()
-                # Extraer JSON del response
-                json_match = re.search(r'\{.*\}', raw, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group(0))
-        except Exception as e:
-            print(f"[Jarvis] Llama fallo, usando fallback: {e}")
-
-        if not data:
-            data = {
-                "project_name": "proyecto_web",
-                "project_title": "Mi Proyecto",
-                "hero_description": "Un proyecto web moderno y elegante.",
-                "menu": [
-                    {"nombre": "Producto 1", "descripcion": "Descripcion del producto", "precio": 100, "emoji": "item"},
-                    {"nombre": "Producto 2", "descripcion": "Otro producto increible", "precio": 200, "emoji": "item"},
-                ]
-            }
-
-        data["_raw_prompt"] = big_prompt
-        palette_match = re.search(r'(?:paleta|estilo|colores?|diseno|diseño)\s+([\w\s]+?)(?:\.|,|$)', big_prompt.lower())
-        palette_override = palette_match.group(1).strip() if palette_match else None
-
-        # Auto-instalar DESIGN.md si el usuario menciona un diseño de design.md
+        # ── 1. Auto-elegir DESIGN.md ──────────────────────────────────────
         design_id = resolve_design_id(big_prompt)
-        data["_design_id"] = design_id
+        if not design_id:
+            # qwen elige el mejor diseño del catálogo según el proyecto
+            catalog_sample = ", ".join(list(DESIGNS_CATALOG.keys())[:30])
+            pick_prompt = (
+                f"Proyecto: {big_prompt[:300]}\n"
+                f"Elige el ID de diseño MAS APROPIADO de esta lista: {catalog_sample}\n"
+                f"Responde SOLO el id, sin explicar. Ejemplo: matcha"
+            )
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    r = await client.post("http://127.0.0.1:11434/api/generate",
+                        json={"model": CODER_MODEL, "prompt": pick_prompt,
+                              "stream": False, "options": {"temperature": 0.2, "num_predict": 20}})
+                    design_id = r.json().get("response", "").strip().lower().split()[0]
+                    if design_id not in DESIGNS_CATALOG.values():
+                        design_id = resolve_design_id(design_id) or "matcha"
+            except Exception:
+                design_id = "matcha"
+        print(f"[Jarvis Designer] Diseno elegido: {design_id}")
 
-        return self._deploy_to_windows(data, palette_override=palette_override)
+        # ── 2. Nombre del proyecto ────────────────────────────────────────
+        name_prompt = (
+            f"Proyecto: {big_prompt[:200]}\n"
+            f"Responde SOLO el nombre del proyecto en formato snake_case, sin espacios. Ejemplo: cafeteria_moderna"
+        )
+        p_name = "proyecto_web"
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post("http://127.0.0.1:11434/api/generate",
+                    json={"model": CODER_MODEL, "prompt": name_prompt,
+                          "stream": False, "options": {"temperature": 0.1, "num_predict": 15}})
+                raw_name = r.json().get("response", "").strip().lower()
+                p_name = re.sub(r'[^a-z0-9_]', '_', raw_name.split()[0])[:30] or "proyecto_web"
+        except Exception:
+            pass
+
+        # ── 3. Crear carpeta e instalar DESIGN.md ─────────────────────────
+        self.active_project = p_name
+        _save_session(p_name)
+        p_path = os.path.join(WORKSPACE, p_name)
+        os.makedirs(p_path, exist_ok=True)
+
+        install_design(design_id, p_path)
+        design_content = read_design_md(p_path)
+        design_hint = f"\n\n## DESIGN SPECIFICATION (DESIGN.md):\n{design_content}" if design_content else ""
+
+        # ── 4. qwen genera el HTML completo ──────────────────────────────
+        html_prompt = f"""You are an expert Senior Frontend Developer. Generate a COMPLETE, SINGLE-FILE HTML page.
+
+PROJECT BRIEF: {big_prompt}
+{design_hint}
+
+MANDATORY RULES:
+1. Return ONLY valid HTML starting with <!DOCTYPE html>. No markdown fences, no explanation.
+2. All CSS must be inline in a <style> tag. Use the colors/fonts from DESIGN.md if provided.
+3. All JS must be inline in a <script> tag at bottom.
+4. Use ONLY ASCII-safe HTML entities for special characters: &aacute; &eacute; &iacute; &oacute; &uacute; &ntilde; &iexcl; &iquest; &#8212;
+5. The page must be BEAUTIFUL, modern, responsive with micro-animations.
+6. Include real, useful sections for the project type (hero, services/menu, contact, etc).
+7. NO placeholder content - generate realistic data for this specific project.
+8. Use Google Fonts via <link> tag matching the design typography.
+9. Make it production-ready quality, not a demo.
+
+OUTPUT: Valid HTML only."""
+
+        html = ""
+        try:
+            print("[Jarvis Coder] qwen2.5-coder generando HTML completo...")
+            async with httpx.AsyncClient(timeout=240) as client:
+                res = await client.post("http://127.0.0.1:11434/api/generate",
+                    json={"model": CODER_MODEL,
+                          "prompt": html_prompt,
+                          "stream": False,
+                          "options": {"temperature": 0.3, "num_predict": 6000}})
+                raw = res.json().get("response", "").strip()
+                # Limpiar fence de markdown si qwen lo incluyo
+                raw = re.sub(r'^```(?:html)?\s*', '', raw, flags=re.IGNORECASE)
+                raw = re.sub(r'\s*```\s*$', '', raw).strip()
+                if "<html" in raw.lower():
+                    html = raw
+        except Exception as e:
+            print(f"[Jarvis Coder] Error LLM: {e}")
+
+        if not html or len(html) < 200:
+            print("[Jarvis Coder] LLM no genero HTML valido, usando fallback minimo.")
+            html = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><title>{p_name.replace('_',' ').title()}</title>
+<style>body{{background:#0d1117;color:#e6edf3;font-family:monospace;display:flex;
+align-items:center;justify-content:center;height:100vh;margin:0;}}
+h1{{font-size:2rem;color:#3fb950;}}</style></head>
+<body><h1>{p_name.replace('_',' ').title()}</h1><p>Proyecto generado por Jarvis.</p></body></html>"""
+
+        # ── 5. Guardar y abrir ────────────────────────────────────────────
+        index_path = os.path.join(p_path, "index.html")
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        os.system(f'start "" "{index_path}"')
+        try:
+            subprocess.Popen(f'code "{p_path}"', shell=True)
+        except Exception:
+            pass
+
+        return f"Senor, '{p_name.replace('_',' ').title()}' generado con diseno '{design_id}'. Navegador y VS Code abiertos."
 
     def _deploy_to_windows(self, data, palette_override=None):
         p_name = data.get("project_name", "proyecto_web").replace(" ", "_")
