@@ -1035,33 +1035,46 @@ class JarvisDeveloper:
         install_design(design_id, p_path)
         design_content = read_design_md(p_path)
 
-        # ── 4. Pipeline multi-agente (Stylist → Architect → Coder → Director) ──
-        result = await run_agency(big_prompt, design_content)
-        html   = result["html"]
+        # ── 4. Pipeline multi-agente (Stylist -> Architect -> Photographer -> Coder -> Scripter) ──
+        result = await run_agency(big_prompt, design_content, project_path=p_path)
 
-        if not html or len(html) < 300:
-            print("[Jarvis] Pipeline sin HTML valido — fallback minimo.")
-            html = f"""<!DOCTYPE html>
+        # ── 5. Guardar archivos generados ─────────────────────────────────
+        files = result.get("files", {})
+        if not files or not files.get("index.html") or len(files.get("index.html", "")) < 300:
+            print("[Jarvis] Pipeline sin HTML valido -- fallback minimo.")
+            files = {"index.html": f"""<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8">
 <title>{p_name.replace('_',' ').title()}</title>
 <style>body{{background:#0d1117;color:#e6edf3;font-family:monospace;
 display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
 h1{{color:#3fb950;}}</style></head>
-<body><h1>{p_name.replace('_',' ').title()}</h1><p>Jarvis — pipeline fallback</p></body></html>"""
+<body><h1>{p_name.replace('_',' ').title()}</h1><p>Jarvis -- pipeline fallback</p></body></html>"""}
 
-        # ── 5. Guardar y abrir ────────────────────────────────────────────
+        for fname, content in files.items():
+            fpath = os.path.join(p_path, fname)
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"[Jarvis] Guardado: {fname} ({len(content)} chars)")
+
+        # Guardar prompts de imagenes para futura generacion con Stable Diffusion
+        image_prompts = result.get("image_prompts", [])
+        if image_prompts:
+            prompts_path = os.path.join(p_path, "image_prompts.json")
+            with open(prompts_path, "w", encoding="utf-8") as f:
+                json.dump(image_prompts, f, indent=2, ensure_ascii=False)
+            print(f"[Jarvis] Guardado: image_prompts.json ({len(image_prompts)} conceptos)")
+
+        # ── 6. Abrir en navegador y VS Code ───────────────────────────────
         index_path = os.path.join(p_path, "index.html")
-        with open(index_path, "w", encoding="utf-8") as f:
-            f.write(html)
-
         os.system(f'start "" "{index_path}"')
         try:
             subprocess.Popen(f'code "{p_path}"', shell=True)
         except Exception:
             pass
 
-        return (f"Se&ntilde;or, '{p_name.replace('_',' ').title()}' generado v&iacute;a pipeline "
-                f"4-agentes con dise&ntilde;o '{design_id}'. Navegador y VS Code abiertos.")
+        n_files = len(files)
+        return (f"Senor, '{p_name.replace('_',' ').title()}' generado via pipeline "
+                f"5-agentes con diseno '{design_id}'. {n_files} archivos creados. Navegador y VS Code abiertos.")
 
     def _deploy_to_windows(self, data, palette_override=None):
         p_name = data.get("project_name", "proyecto_web").replace(" ", "_")

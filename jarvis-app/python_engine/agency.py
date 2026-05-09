@@ -9,11 +9,66 @@ agency.py — Sistema Multi-Agente de Diseño Web para Jarvis
   4. Creative Director → Pule animaciones, sombras y coherencia visual
 """
 
-import httpx, re
+import httpx, re, json, os, base64
 
 CODER_MODEL   = "qwen2.5-coder:7b"
 GENERAL_MODEL = "llama3.1:latest"
 OLLAMA_URL    = "http://127.0.0.1:11434/api/generate"
+FORGE_URL     = "http://127.0.0.1:7860/sdapi/v1/txt2img"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Contrato de IDs compartido entre Coder y Scripter
+# ─────────────────────────────────────────────────────────────────────────────
+
+UI_CONTRACT = """
+MANDATORY DOM IDs:
+- Cart Count Badge: 'cart-count'
+- Cart Sidebar Container: 'cart-sidebar'
+- Cart Items List: 'cart-items-container'
+- Total Price Display: 'cart-total'
+- Checkout Button: 'btn-checkout'
+
+MANDATORY CLASSES:
+- Add to Cart Buttons: 'btn-add' (must have data-id, data-name, data-price)
+- Open Cart Trigger: 'btn-open-cart'
+"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generador de imagenes fisicas via Forge/Stable Diffusion
+# ─────────────────────────────────────────────────────────────────────────────
+
+UNSPLASH_FALLBACKS = [
+    "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1514432324607-a09d9b4aefda?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400&h=400&fit=crop",
+]
+
+async def generar_imagen_fisica(prompt: str, filename: str, project_path: str) -> str:
+    """Llama a Forge (RTX 3050) para crear imagen real. Fallback a Unsplash."""
+    payload = {
+        "prompt": f"{prompt}, professional photography, 4k, highly detailed",
+        "negative_prompt": "blurry, low quality, text, watermark",
+        "steps": 20, "width": 512, "height": 512,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            res = await client.post(FORGE_URL, json=payload)
+            if res.status_code == 200:
+                img_data = res.json()["images"][0]
+                assets_dir = os.path.join(project_path, "assets")
+                os.makedirs(assets_dir, exist_ok=True)
+                with open(os.path.join(assets_dir, filename), "wb") as f:
+                    f.write(base64.b64decode(img_data))
+                print(f"[Agency] Imagen generada con GPU: assets/{filename}")
+                return f"assets/{filename}"
+    except Exception as e:
+        print(f"[Agency] Forge no disponible ({e}), usando Unsplash fallback.")
+    # Fallback
+    idx = hash(filename) % len(UNSPLASH_FALLBACKS)
+    return UNSPLASH_FALLBACKS[idx]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -159,128 +214,213 @@ async def run_architect(user_prompt: str, css_vars: str) -> str:
     return plan
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Agente 3 — CODER
+# Agente 3 — CODER (Solo Diseno Visual)
 # ─────────────────────────────────────────────────────────────────────────────
 
-CODER_PROMPT = """You are the CODER AGENT — a 10x Senior Frontend Engineer.
-Write the COMPLETE, SINGLE-FILE HTML page.
+CODER_PROMPT = """You are the LEAD UI DEVELOPER. Build a premium interface.
 
 PROJECT REQUEST: {user_prompt}
 
 ARCHITECT'S PLAN:
 {architect_plan}
 
-CSS DESIGN TOKENS (MUST USE EVERYWHERE):
+CSS DESIGN TOKENS (INJECT THESE INTO THE HEAD):
 {css_vars}
 
-MANDATORY RULES:
+UI CONTRACT (YOU MUST USE THESE EXACT IDs AND CLASSES):
+{ui_contract}
+
+IMAGE PATHS TO USE:
+{image_paths}
+
+RULES:
 1. Output ONLY raw HTML starting with <!DOCTYPE html>.
-2. Build ALL CSS inside <style> using the provided CSS variables. Do not use default unstyled HTML! Every button, input, and div must look premium.
-3. Import Google Fonts. Apply --font-display to headings and --font-body to text.
-4. CRITICAL: THIS IS A STANDALONE MOCKUP. DO NOT use `fetch()` or external APIs to load data. HARDCODE a JavaScript array with at least 6 beautiful, realistic products and render them dynamically. Use Unsplash image URLs (https://images.unsplash.com/photo-...).
-5. If a shopping cart is requested, implement the UI for it (e.g., a sliding sidebar or modal) and write inline JavaScript to make "Add to Cart" functional entirely in memory (update counters, show items, calculate total).
-6. The layout MUST be responsive (Flexbox/Grid).
-7. Ensure massive padding, modern UI patterns (glassmorphism, cards), and breathing room between sections.
+2. Use Tailwind CSS CDN: <script src="https://cdn.tailwindcss.com"></script>
+3. Build a Hero Section, a Product Grid, and a Hidden Sidebar for the Shopping Cart.
+4. Follow the UI CONTRACT above for all IDs and classes.
+5. STYLE: Use glassmorphism, rounded-3xl, smooth transitions. Map CSS variables via Tailwind: bg-[var(--color-bg)], text-[var(--color-text)].
+6. Use the IMAGE PATHS provided above for hero and products. DO NOT use via.placeholder.com.
+7. Hardcode 4 product cards with realistic names, descriptions, prices.
+8. DO NOT write any <script> logic. Add <script src="script.js"></script> before </body>.
 
-OUTPUT: raw HTML only. NO markdown fences. NO explanations. DO NOT use placeholders like `<!-- existing code -->`. You MUST output the ENTIRE document from `<!DOCTYPE html>` to `</html>`!"""
+OUTPUT: ONLY HTML/CSS. NO markdown fences. NO JavaScript logic."""
 
-async def run_coder(user_prompt: str, architect_plan: str, css_vars: str) -> str:
-    print("[Agency]  Coder escribiendo HTML + JS...")
+async def run_coder(user_prompt: str, architect_plan: str, css_vars: str,
+                   image_paths: list = None) -> str:
+    print("[Agency] Coder construyendo interfaz visual...")
+    paths_str = "\n".join(f"- Image {i+1}: {p}" for i, p in enumerate(image_paths or []))
+    if not paths_str:
+        paths_str = "Use Unsplash coffee images."
     prompt = CODER_PROMPT.format(
         user_prompt=user_prompt[:400],
         architect_plan=architect_plan[:2000],
         css_vars=css_vars[:800],
+        ui_contract=UI_CONTRACT,
+        image_paths=paths_str,
     )
     raw = await _call_llm(prompt, model=CODER_MODEL, max_tokens=7000, temperature=0.3)
     html = _clean_code(raw, "html")
-    print(f"[Agency]  Coder OK — {len(html)} chars de HTML generados.")
+    print(f"[Agency] Coder OK -- {len(html)} chars de HTML generados.")
     return html
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Agente 4 — CREATIVE DIRECTOR
+# Agente 4 — PHOTOGRAPHER (Conceptos Visuales para Stable Diffusion)
 # ─────────────────────────────────────────────────────────────────────────────
 
-DIRECTOR_PROMPT = """You are the CREATIVE DIRECTOR AGENT — an obsessive Art Director.
-ELEVATE the following HTML page to world-class, jaw-dropping quality.
+PHOTOGRAPHER_PROMPT = """You are the VISUAL CONTENT DIRECTOR.
+Based on the project: {user_prompt}, identify 4 key images needed (e.g., hero_bg, product_1, product_2, product_3).
+For each image, write a highly detailed artistic prompt for Stable Diffusion.
+Output ONLY a JSON list like this:
+[{{"name": "hero.png", "prompt": "high quality coffee shop interior, cinematic lighting..."}}, ...]
+No markdown fences. No explanation. ONLY valid JSON."""
 
-DESIGN TOKENS:
-{css_vars}
+async def run_photographer(user_prompt: str) -> list:
+    print("[Agency] Photographer creando conceptos visuales...")
+    raw = await _call_llm(
+        PHOTOGRAPHER_PROMPT.format(user_prompt=user_prompt[:400]),
+        model=CODER_MODEL, max_tokens=800, temperature=0.5
+    )
+    try:
+        cleaned = _clean_code(raw, "json")
+        # Intentar parsear JSON
+        prompts = json.loads(cleaned)
+        print(f"[Agency] Photographer OK -- {len(prompts)} conceptos de imagen generados.")
+        return prompts
+    except Exception as e:
+        print(f"[Agency] Photographer fallo parseando JSON: {e}")
+        # Fallback: imagenes por defecto
+        return [
+            {"name": "hero.png", "prompt": "premium coffee shop interior, warm lighting, cinematic, 4k"},
+            {"name": "product_1.png", "prompt": "artisan espresso coffee cup, steam, dark background, product photography"},
+            {"name": "product_2.png", "prompt": "fresh croissant on rustic wooden table, bakery, warm tones"},
+            {"name": "product_3.png", "prompt": "iced latte with milk swirl, glass cup, minimalist background"},
+        ]
 
-ORIGINAL HTML:
-{coder_html}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agente 5 — SCRIPTER (Solo Logica JS - State-Based)
+# ─────────────────────────────────────────────────────────────────────────────
+
+SCRIPTER_PROMPT = f"""You are a SENIOR JS ENGINEER.
+Create the logic for a state-based shopping cart.
+
+CONTRACT TO FOLLOW:
+{UI_CONTRACT}
+
+HTML STRUCTURE PROVIDED:
+{{coder_html}}
 
 TASKS:
-1. ADD CSS animations (fade-in, slide-up on scroll, smooth hover lifts with shadows).
-2. ADD visual depth (glassmorphism for navbars/modals, gradients, subtle borders).
-3. FIX any ugly or unstyled elements. Make sure buttons look clickable and premium (using --color-accent).
-4. VERIFY all colors use CSS variables. 
-5. POLISH typography: large heroic titles, readable line-heights.
-6. IF there is a shopping cart or product grid, ensure the layout is immaculate.
+1. Initialize 'let cart = [];'.
+2. Use Event Delegation: document.addEventListener('click', e => ... ) for '.btn-add' and '.btn-open-cart'.
+3. Update LocalStorage on every cart change.
+4. Function 'renderCart()' must clear and rebuild 'cart-items-container' using template literals.
+5. All prices must be formatted with 2 decimals.
+6. Update 'cart-count' badge and 'cart-total' on every change.
+7. 'toggleCart()' must toggle 'cart-sidebar' visibility with translate-x transition.
 
-CRITICAL:
-- Output ONLY the final polished HTML. No explanation, no markdown fences.
-- Keep ALL JavaScript and HTML content intact. DO NOT use placeholders like `<!-- existing content here -->`. YOU MUST OUTPUT THE ENTIRE FILE from `<!DOCTYPE html>` to `</html>`!
-- Make it look like a $50,000 custom website."""
+OUTPUT: ONLY the JavaScript code. No explanations. No markdown fences. No <script> tags."""
 
-
-async def run_creative_director(css_vars: str, coder_html: str) -> str:
-    print("[Agency]  Creative Director puliendo interfaz...")
-    prompt = DIRECTOR_PROMPT.format(
-        css_vars=css_vars[:800],
-        coder_html=coder_html[:8000],
-    )
-    raw = await _call_llm(prompt, model=CODER_MODEL, max_tokens=8000, temperature=0.4)
-    html = _clean_code(raw, "html")
-    if "<html" not in html.lower():
-        html = _clean_code(raw, "")
-    # Si el director no devuelve HTML válido, quedarse con el del Coder
-    if len(html) < 500 or "<html" not in html.lower():
-        print("[Agency]  Director devolvio output invalido, usando HTML del Coder.")
-        return coder_html
-    print(f"[Agency]  Director OK — HTML final: {len(html)} chars.")
-    return html
+async def run_scripter(coder_html: str) -> str:
+    print("[Agency] Scripter programando logica funcional...")
+    prompt = SCRIPTER_PROMPT.format(coder_html=coder_html[:6000])
+    raw = await _call_llm(prompt, model=CODER_MODEL, max_tokens=2500, temperature=0.2)
+    js = _clean_code(raw, "javascript")
+    if not js or len(js) < 50:
+        js = _clean_code(raw, "")
+    js = re.sub(r'^\s*<script[^>]*>\s*', '', js, flags=re.IGNORECASE)
+    js = re.sub(r'\s*</script>\s*$', '', js, flags=re.IGNORECASE)
+    print(f"[Agency] Scripter OK -- {len(js)} chars de JS generados.")
+    return js
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ORCHESTRATOR — run_agency()
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def run_agency(user_prompt: str, design_md: str = "") -> dict:
+async def run_agency(user_prompt: str, design_md: str = "", project_path: str = "") -> dict:
     """
-    Orquesta el pipeline completo de 4 agentes.
+    Orquesta el pipeline de 5 agentes:
+      Stylist -> Architect -> Coder -> Photographer -> Scripter
 
     Args:
-        user_prompt: Descripción del proyecto (lo que el usuario le pidió a Jarvis).
+        user_prompt: Descripcion del proyecto.
         design_md:   Contenido del archivo DESIGN.md instalado en el proyecto.
 
     Returns:
         dict con keys:
-          - html          : str — HTML final listo para guardar
-          - css_vars      : str — tokens CSS del Stylist
-          - architect_plan: str — plan del Architect
+          - files         : dict[str, str] -- archivos a guardar {nombre: contenido}
+          - html          : str -- HTML final (para compatibilidad)
+          - css_vars      : str -- tokens CSS del Stylist
+          - architect_plan: str -- plan del Architect
+          - image_prompts : list -- prompts del Photographer para Stable Diffusion
           - design_used   : bool
     """
-    print("\n[Agency] ══════════════════════════════════════════════")
-    print(f"[Agency] 🚀 Pipeline iniciado para: {user_prompt[:80]}")
-    print("[Agency] ══════════════════════════════════════════════")
+    print("\n[Agency] ====================================================")
+    print(f"[Agency] Pipeline iniciado para: {user_prompt[:80]}")
+    print("[Agency] ====================================================")
 
-    # Stage 1 — Stylist
+    # Stage 1 -- Stylist
     css_vars = await run_stylist(user_prompt, design_md)
 
-    # Stage 2 — Architect
+    # Stage 2 -- Architect
     architect_plan = await run_architect(user_prompt, css_vars)
 
-    # Stage 3 — Coder
-    coder_html = await run_coder(user_prompt, architect_plan, css_vars)
+    # Stage 3 -- Photographer (genera imagenes ANTES que el Coder)
+    image_prompts = await run_photographer(user_prompt)
+    image_paths = []
+    if project_path:
+        for concept in image_prompts:
+            ruta = await generar_imagen_fisica(
+                concept["prompt"], concept["name"], project_path
+            )
+            image_paths.append(ruta)
+    else:
+        image_paths = UNSPLASH_FALLBACKS[:len(image_prompts)]
 
-    # Stage 4 — Creative Director
-    final_html = await run_creative_director(css_vars, coder_html)
+    # Stage 4 -- Coder (recibe las rutas reales de imagenes)
+    coder_html = await run_coder(user_prompt, architect_plan, css_vars, image_paths)
 
-    print("[Agency] ✅ Pipeline completo.")
+    # Stage 5 -- Scripter (Solo Logica)
+    logic_js = await run_scripter(coder_html)
+
+    # ── Ensamblaje final ──────────────────────────────────────────────
+    # Safety net: reemplazar placeholders rotos con Unsplash
+    img_idx = [0]
+    def _next_fallback(match):
+        url = UNSPLASH_FALLBACKS[img_idx[0] % len(UNSPLASH_FALLBACKS)]
+        img_idx[0] += 1
+        return url
+    coder_html = re.sub(r'https?://via\.placeholder\.com/[^"]*', _next_fallback, coder_html)
+
+    # Asegurar que el HTML tenga el link a script.js
+    if "script.js" not in coder_html:
+        if "<!-- JS_HERE -->" in coder_html:
+            coder_html = coder_html.replace(
+                "<!-- JS_HERE -->",
+                '<script src="script.js"></script>'
+            )
+        else:
+            coder_html = coder_html.replace(
+                "</body>",
+                '<script src="script.js"></script>\n</body>'
+            )
+
+    files = {
+        "index.html": coder_html,
+        "script.js":  logic_js,
+    }
+
+    print(f"[Agency] Pipeline completo: {len(files)} archivos generados.")
+    for fname, content in files.items():
+        print(f"  -> {fname}: {len(content)} chars")
 
     return {
-        "html":           final_html,
+        "files":          files,
+        "html":           coder_html,
         "css_vars":       css_vars,
         "architect_plan": architect_plan,
+        "image_prompts":  image_prompts,
         "design_used":    bool(design_md),
     }
