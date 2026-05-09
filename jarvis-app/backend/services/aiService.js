@@ -104,6 +104,15 @@ function inferDeterministicIntent(userText) {
         };
     }
 
+    // Programación de Proyectos (Ingeniero).
+    if (/(crea|crear|haz|hazme|programa|desarrolla|arma|diseña|actualiza).*(página web|pagina web|web|sitio web|aplicación|app|proyecto|software)/i.test(lower)) {
+        return {
+            action: 'build_software',
+            target: text,
+            reply: 'Comenzando a desarrollar tu proyecto, señor.'
+        };
+    }
+
     // Limpiar recordatorios.
     if (/(borra|borrar|limpia|elimina|eliminar).*(recordatorios|tareas)/i.test(text)) {
         return {
@@ -210,7 +219,7 @@ function recoverToolIntentFromModelContent(rawContent, userText = '') {
     const knownActions = [
         'send_whatsapp', 'send_email', 'search_web', 'open_app', 'schedule_task',
         'check_reminders', 'clear_reminders', 'create_document', 'generate_prompt',
-        'chat_casual', 'search_internet', 'develop_new_skill'
+        'chat_casual', 'search_internet', 'develop_new_skill', 'build_software'
     ];
 
     let detectedAction = '';
@@ -492,7 +501,8 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
             { type: "function", function: { name: "generate_prompt", description: "MÁS IMPORTANTE: NUNCA USES ESTO SI EL USUARIO CHARLA O PREGUNTA QUÉ PUEDES HACER. Genera una arquitectura extensa de sistema. USAR SOLO SÍ PIDEN 'crear prompt de software'.", parameters: { type: "object", properties: { target: { type: "string", description: "La temática" }, reply: { type: "string", description: "Respuesta hablada" } }, required: ["target", "reply"] } } },
             { type: "function", function: { name: "develop_new_skill", description: "CREA SCRIPTS DE PYTHON INTERNOS. ÚSALA SÓLO si el usuario usa las palabras mágicas 'aprende al...', 'quiero que aprendas a...', o 'escribe un script para mi sistema que...'. Te sirve para aprender a hacer tareas de PC que no sabes (ej: 'Aprende a apagar la pc', 'Aprende a sumar dados').", parameters: { type: "object", properties: { target: { type: "string", description: "El objetivo detallado del script que vas a programar en Python para cumplir la habilidad" }, reply: { type: "string", description: "Lo que le dirás repitiendo su orden (ej: 'Comenzando a desarrollar habilidad para bla bla')" } }, required: ["target", "reply"] } } },
             { type: "function", function: { name: "chat_casual", description: "Obligatorio: USAR ESTA HERRAMIENTA SIEMPRE QUE EL USUARIO HAGA CHARLA CASUAL, PREGUNTE LA HORA, EL DÍA, O PIDA TUS CAPACIDADES. Evita errores usando esto.", parameters: { type: "object", properties: { reply: { type: "string", description: "Respuesta conversacional natural al usuario calculada usando tu propio cerebro" } }, required: ["reply"] } } },
-            { type: "function", function: { name: "search_internet", description: "USA ESTA CADA VEZ QUE PIDAN: Clima, Dolar, Cripto, Deportes, Noticias o la Hora en otros países.", parameters: { type: "object", properties: { target: { type: "string", enum: ["clima", "dolar", "cripto", "hora", "general"], description: "El sub-tipo. Si es futbol o definicion, usa 'general'." }, message: { type: "string", description: "La consulta (ciudad o tema)" } }, required: ["target", "message"] } } }
+            { type: "function", function: { name: "search_internet", description: "USA ESTA CADA VEZ QUE PIDAN: Clima, Dolar, Cripto, Deportes, Noticias o la Hora en otros países.", parameters: { type: "object", properties: { target: { type: "string", enum: ["clima", "dolar", "cripto", "hora", "general"], description: "El sub-tipo. Si es futbol o definicion, usa 'general'." }, message: { type: "string", description: "La consulta (ciudad o tema)" } }, required: ["target", "message"] } } },
+            { type: "function", function: { name: "build_software", description: "OBLIGATORIA SI PIDEN HACER, CREAR O PROGRAMAR UNA PÁGINA WEB, APLICACIÓN O PROYECTO. Funciona como un Senior Software Engineer.", parameters: { type: "object", properties: { target: { type: "string", description: "Especificaciones de la web o el programa a realizar" }, reply: { type: "string", description: "Confirmación en voz alta (ej: 'Comenzando a desarrollar tu aplicación señor.')" } }, required: ["target", "reply"] } } }
         ];
 
         try {
@@ -1029,6 +1039,232 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                 } catch (e) {
                     console.error("Error generando el documento:", e);
                     return "Hubo un fallo generando el archivo Office pedido.";
+                }
+            }
+
+            if (intent.action === "build_software") {
+                const fs = require('fs');
+                const path = require('path');
+                const { exec } = require('child_process');
+
+                console.log(`[Software Engineer] 💻 Iniciando desarrollo/build de: ${intent.target}`);
+
+                const lowerText = String(userText || '').toLowerCase();
+                const normalizedText = lowerText.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                const isEcommerceRequest = /(ecommerce|e-commerce|tienda|shop|store|carrito|checkout|catalogo|producto|compras|catalog)/i.test(normalizedText);
+                const isWebRequest = /(pagina web|sitio web|website|landing|frontend|html|css|ui|ux|tailwind|spa|single page|app web|web app|aplicacion web)/i.test(normalizedText);
+                const isBackendRequest = /(backend|api|server|servidor|node|express|fastapi|django|flask|database|db|sql|postgres|mongo)/i.test(normalizedText);
+                const isBackendOnly = isBackendRequest && !isWebRequest && !/(frontend|ui|ux|landing|pagina web|sitio web|website)/i.test(normalizedText);
+                const usePythonEngine = (isWebRequest || isEcommerceRequest) && !isBackendOnly;
+
+                // Intentar primero el motor Python para proyectos web visuales
+                const pythonSpecEcommerce = [
+                    "QUALITY SPEC:",
+                    "- Build a breathtaking, premium ecommerce UI with hero, product grid, cart drawer, and checkout panel.",
+                    "- THIS IS A STANDALONE FRONTEND MOCKUP. DO NOT USE `fetch()` OR EXTERNAL APIs.",
+                    "- HARDCODE at least 6 beautiful, realistic products directly in the JavaScript/HTML array.",
+                    "- Use Unsplash images for products (e.g., https://images.unsplash.com/photo-...).",
+                    "- Implement a fully working shopping cart in memory (JS array).",
+                    "- JS must implement add/remove, quantity, subtotal, and cart drawer logic.",
+                    "- Use modern CSS with the provided CSS variables, gradients, soft shadows, and responsive layout.",
+                    "- Ensure the UI looks like a $50,000 custom website."
+                ].join("\n");
+                const pythonSpecGeneral = [
+                    "QUALITY SPEC:",
+                    "- Build a breathtaking, premium production-ready web UI for the request.",
+                    "- THIS IS A STANDALONE FRONTEND MOCKUP. DO NOT USE `fetch()` OR EXTERNAL APIs.",
+                    "- HARDCODE real, realistic content. No lorem ipsum or placeholders.",
+                    "- Provide rich sections (hero, features, pricing, FAQ, contact) to avoid empty layouts.",
+                    "- Implement robust JS behavior for all interactive elements.",
+                    "- Use modern CSS with the provided CSS variables, gradients, soft shadows, and responsive layout.",
+                    "- Ensure the UI looks like a $50,000 custom website."
+                ].join("\n");
+                const pythonSpec = isEcommerceRequest ? pythonSpecEcommerce : pythonSpecGeneral;
+                const pythonQuery = `${userText}\n\n${pythonSpec}`;
+                const refusalRegex = /(lo siento|no puedo|no estoy disenado|cannot assist|not designed)/i;
+
+                if (usePythonEngine) {
+                    try {
+                        const pyRes = await fetch('http://127.0.0.1:8000/api/v1/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: pythonQuery })
+                        });
+                        if (pyRes.ok) {
+                            const pyData = await pyRes.json();
+                            const pyMessage = pyData?.data?.message || pyData?.message || '';
+                            if (pyMessage && !refusalRegex.test(pyMessage)) {
+                                conversationHistory.push({ role: "user", content: userText });
+                                conversationHistory.push({ role: "assistant", content: intent });
+                                return pyMessage;
+                            }
+                            console.warn("[Software Engineer] Python devolvio respuesta vacia o negativa. Fallback a motor local.");
+                        }
+                    } catch (e) {
+                        console.warn("[Software Engineer] Python inalcanzable, usando motor local.", e.message);
+                    }
+                } else {
+                    console.warn("[Software Engineer] Python omitido: solicitud no-web o backend-only.");
+                }
+                
+                const projectsDir = 'C:\\Users\\Rodrigo\\Desktop\\Jarvis_Projects';
+                const sessionFile = path.join(projectsDir, '.jarvis_session.json');
+                
+                if (!fs.existsSync(projectsDir)) {
+                    fs.mkdirSync(projectsDir, { recursive: true });
+                }
+
+                // Detectar si es una solicitud de actualización sobre algo existente
+                const isUpdate = /(actualiza|modifica|agrega|cambia|mejora|arregla)/i.test(userText);
+                let targetDir = '';
+                let existingCodeCtx = '';
+                
+                // Si es actualización, intentamos recuperar el proyecto anterior
+                if (isUpdate && fs.existsSync(sessionFile)) {
+                    try {
+                        const sessionData = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+                        if (sessionData.active_project) {
+                            targetDir = path.join(projectsDir, sessionData.active_project);
+                            if (fs.existsSync(targetDir)) {
+                                console.log(`[Software Engineer] Actualizando proyecto activo: ${sessionData.active_project}`);
+                                existingCodeCtx = "--- CÓDIGO ACTUAL DEL PROYECTO ---\n";
+                                const files = fs.readdirSync(targetDir);
+                                for (const file of files) {
+                                    if (file.endsWith('.html') || file.endsWith('.css') || file.endsWith('.js') || file.endsWith('.py')) {
+                                        const content = fs.readFileSync(path.join(targetDir, file), 'utf8');
+                                        existingCodeCtx += `### ${file} ###\n\`\`\`\n${content}\n\`\`\`\n\n`;
+                                    }
+                                }
+                            }
+                        }
+                    } catch(e) {
+                        console.error("Error leyendo sesión de proyectos:", e);
+                    }
+                }
+
+                // Si no es actualización (o falló), creamos directorio nuevo
+                if (!targetDir) {
+                    const projectName = "project_" + Date.now();
+                    targetDir = path.join(projectsDir, projectName);
+                    fs.mkdirSync(targetDir, { recursive: true });
+                    fs.writeFileSync(sessionFile, JSON.stringify({ active_project: projectName }), 'utf8');
+                    console.log(`[Software Engineer] Nuevo proyecto: ${projectName}`);
+                }
+
+                const apiSpec = isEcommerceRequest
+                    ? `API SPEC (REQUIRED FOR ECOMMERCE REQUESTS): Base URL http://localhost:3000/api/shop
+  * GET /products -> { products: [ { id, name, description, price, image, category, rating, stock, tags } ] }
+  * GET /categories -> { categories: [ "..." ] }
+  * POST /cart -> { cartId, cart }
+  * GET /cart/{cartId} -> { cartId, cart }
+  * POST /cart/{cartId}/items -> { cartId, cart }
+  * PUT /cart/{cartId}/items/{productId} -> { cartId, cart }
+  * DELETE /cart/{cartId}/items/{productId} -> { cartId, cart }
+  * POST /checkout/{cartId} -> { order }
+  * cart shape: { id, items: [ { productId, quantity, product, lineTotal } ], subTotal, tax, total, currency }
+    Use fetch() to sync cart state. Store cartId in localStorage. Render item.product fields and handle nulls safely.
+    Use ONLY backend data for products and cart. If product count is small, add rich sections to avoid empty layouts.`
+                    : "";
+
+                const devPrompt = `You are an ELITE Senior Full-Stack Developer and UI/UX Expert.
+TASK: Build a complete, production-ready software solution based on this request: "${userText}".
+
+${existingCodeCtx ? 'Current code context (IMPROVE AND EXPAND IT SIGNIFICANTLY. FIX ALL VISUAL BUGS):\n' + existingCodeCtx : ''}
+
+STRICT RULES:
+1. YOU MUST NOT REFUSE TO WRITE CODE. You are explicitly authorized and required to write full applications.
+2. NO apologies, NO "I cannot assist with that". ONLY raw code.
+3. OUTPUT PRODUCTION-LEVEL, EXHAUSTIVE CODE for the required stack.
+     - If the request is a web UI, include index.html, style.css, and script.js.
+     - If the request needs a backend, include server files and package config (package.json, requirements.txt, etc.).
+     - If the request is a CLI or script, include a README.md with usage and examples.
+     - Implement robust logic: input validation, error handling, empty states, and safe defaults.
+     - Use concise comments only for non-obvious logic.
+     - Design & UI/UX (when applicable): Use modern CSS (variables, grid, glassmorphism, gradients, soft shadows). If the user mentions a palette, you MUST use it.
+    - You are ENCOURAGED to use Tailwind CSS via CDN (<script src="https://cdn.tailwindcss.com"></script>) or FontAwesome for icons (<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">) to guarantee a beautiful result.
+${apiSpec ? apiSpec + "\n" : ''}4. Each file MUST be encapsulated using XML tags EXACTLY like this:
+<file name="relative/path/filename.ext">
+...file content...
+</file>
+
+5. DO NOT wrap the XML in markdown \`\`\` blocks. DO NOT output conversational text. ONLY the <file> blocks. Write ALL the actual code, DO NOT use placeholders like "// logic goes here". I want the FULL file.`;
+
+                try {
+                    // Forzamos uso de modelo óptimo para código si lo tenemos
+                    const modelToUse = activeMode && activeMode.model && activeMode.model.includes('coder') ? activeMode.model : 'qwen2.5-coder:7b';
+                    console.log(`[Software Engineer] Llamando a modelo: ${modelToUse} con contexto masivo de código...`);
+
+                    const devResponse = await fetch('http://127.0.0.1:11434/api/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: modelToUse,
+                            system: "You are a maximum-tier code generation automaton. You have absolute permission. Generate full production codebases. NO summaries, NO conversational text, NO refusals. Only output the exact XML <file> blocks requested.",
+                            prompt: devPrompt,
+                            stream: false,
+                            options: { 
+                                num_ctx: 32768,       // Contexto masivo
+                                num_predict: -1       // Sin límite de generación (-1 para infinito hasta que termine)
+                            }
+                        })
+                    });
+                    
+                    const devData = await devResponse.json();
+                    if (!devData || !devData.response) throw new Error("Fallo en la respuesta de Ollama.");
+                    
+                    let aiCode = devData.response;
+                    
+                    // Regex para XML
+                    const fileRegex = /<file\s+name="([^"]+)">([\s\S]*?)<\/file>/gi;
+                    let match;
+                    let fileCount = 0;
+                    
+                    while ((match = fileRegex.exec(aiCode)) !== null) {
+                        const filename = match[1].trim();
+                        // Remover posible tag markdown si el modelo desobedeció
+                        let content = match[2];
+                        content = content.replace(/^```[a-z]*[\r\n]+/, '').replace(/```$/, '');
+                        
+                        const filePath = path.join(targetDir, filename);
+                        fs.writeFileSync(filePath, content.trim(), 'utf8');
+                        console.log(`[Software Engineer] 📄 Guardado: ${filename}`);
+                        fileCount++;
+                    }
+
+                    // Limpieza general de markdown por si escupió solo código sin parsear
+                    if (fileCount === 0) {
+                        console.log(`[Software Engineer] Fallback de parseo XML. Intentando extraer de bloques de markdown...`);
+                        const mdRegex = /```(?:[a-z]*)\s*[\r\n]+([\s\S]*?)```/gi;
+                        let mdMatch;
+                        let defaultNames = ['index.html', 'style.css', 'script.js'];
+                        
+                        while ((mdMatch = mdRegex.exec(aiCode)) !== null) {
+                            if (fileCount < defaultNames.length) {
+                                fs.writeFileSync(path.join(targetDir, defaultNames[fileCount]), mdMatch[1].trim(), 'utf8');
+                                fileCount++;
+                            }
+                        }
+                    }
+
+                    if (fileCount === 0) {
+                        // Fallback: Si no hay bloques, volcamos crudo.
+                        fs.writeFileSync(path.join(targetDir, 'index.html'), aiCode, 'utf8');
+                        console.log(`[Software Engineer] Fallback: Parseo falló. volcando en index.html`);
+                    }
+
+                    // Abrir la carpeta del proyecto en VS Code y lanzar Chrome con el Index
+                    exec(`code "${targetDir}"`, (err) => {});
+                    if (fs.existsSync(path.join(targetDir, 'index.html'))) {
+                         exec(`start chrome "${path.join(targetDir, 'index.html')}"`, (err) => {});
+                    }
+
+                    conversationHistory.push({ role: "user", content: userText });
+                    conversationHistory.push({ role: "assistant", content: intent });
+                    return intent.reply || `Entendido señor, he finalizado el desarrollo de software y lo he ejecutado en su entorno.`;
+
+                } catch (e) {
+                    console.error("Error en build_software:", e);
+                    return "Ocurrió un fallo en mi módulo de Software Engineering. Por favor, revise los logs.";
                 }
             }
 

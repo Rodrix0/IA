@@ -327,37 +327,7 @@ async def process_query(req: UserQuery):
         return {"status": "success", "data": {"action": "reply", "message": result}}
     # Si _tiene_creacion → el design_id se detecta dentro de execute_full_project via resolve_design_id
 
-    # --- 1. CREAR ARCHIVO NUEVO en el proyecto activo ---
-    triggers_nuevo_archivo = [
-        "crea un archivo", "creá un archivo", "crea el archivo",
-        "nuevo archivo", "nueva pagina", "nueva página",
-        "crear pagina", "crear página", "agregar pagina", "agregar página",
-        "haceme un archivo", "generame un archivo"
-    ]
-    es_nuevo_archivo = dev_jarvis.active_project and any(w in low for w in triggers_nuevo_archivo)
-
-    if es_nuevo_archivo:
-        print(f"[Jarvis Logic] 📄 NUEVO ARCHIVO en proyecto '{dev_jarvis.active_project}'.")
-        result = await dev_jarvis.create_new_file(user_text)
-        return {"status": "success", "data": {"action": "reply", "message": result}}
-
-    # --- 2. EDITAR el proyecto activo (solo triggers específicos de edición) ---
-    triggers_edicion = [
-        "modificá", "modifica", "cambiá", "cambia ", "agregá", "agrega ",
-        "quitá", "quita ", "sacá", "saca ", "eliminá", "elimina", "elimines",
-        "editá", "edita ", "mejorá", "mejora", "arreglá", "arregla",
-        "reemplazá", "reemplaza", "borrá", "borra ", "añadí", "añade",
-        "cambia el color", "cambiá el color", "separá", "separa ", "dividí",
-        "actualizá", "actualiza", "seguí trabajando", "sigue trabajando",
-    ]
-    es_edicion = dev_jarvis.active_project and any(w in low for w in triggers_edicion)
-
-    if es_edicion:
-        print(f"[Jarvis Logic] ✏️ EDICION: modificando '{dev_jarvis.active_project}'.")
-        result = await dev_jarvis.edit_project(user_text)
-        return {"status": "success", "data": {"action": "reply", "message": result}}
-
-    # --- 3. NUEVO PROYECTO COMPLETO ---
+    # --- 1. NUEVO PROYECTO COMPLETO ---
     triggers_nuevo_proyecto = [
         # Formas directas
         "quiero que programes", "codeame", "programá esto",
@@ -378,8 +348,38 @@ async def process_query(req: UserQuery):
     es_pedido_codigo = any(t in low for t in triggers_nuevo_proyecto)
 
     if es_pedido_codigo:
-        print(f"[Jarvis Logic] 🚨 NUEVO PROYECTO: ejecutando motor de desarrollo.")
+        print(f"[Jarvis Logic] NUEVO PROYECTO: ejecutando motor de desarrollo.")
         result = await dev_jarvis.execute_full_project(user_text)
+        return {"status": "success", "data": {"action": "reply", "message": result}}
+
+    # --- 2. CREAR ARCHIVO NUEVO en el proyecto activo ---
+    triggers_nuevo_archivo = [
+        "crea un archivo", "creá un archivo", "crea el archivo",
+        "nuevo archivo", "nueva pagina", "nueva página",
+        "crear pagina", "crear página", "agregar pagina", "agregar página",
+        "haceme un archivo", "generame un archivo"
+    ]
+    es_nuevo_archivo = dev_jarvis.active_project and any(w in low for w in triggers_nuevo_archivo)
+
+    if es_nuevo_archivo:
+        print(f"[Jarvis Logic] NUEVO ARCHIVO en proyecto '{dev_jarvis.active_project}'.")
+        result = await dev_jarvis.create_new_file(user_text)
+        return {"status": "success", "data": {"action": "reply", "message": result}}
+
+    # --- 3. EDITAR el proyecto activo (solo triggers específicos de edición) ---
+    triggers_edicion = [
+        "modificá", "modifica", "cambiá", "cambia ", "agregá", "agrega ",
+        "quitá", "quita ", "sacá", "saca ", "eliminá", "elimina", "elimines",
+        "editá", "edita ", "mejorá", "mejora", "arreglá", "arregla",
+        "reemplazá", "reemplaza", "borrá", "borra ", "añadí", "añade",
+        "cambia el color", "cambiá el color", "separá", "separa ", "dividí",
+        "actualizá", "actualiza", "seguí trabajando", "sigue trabajando",
+    ]
+    es_edicion = dev_jarvis.active_project and any(w in low for w in triggers_edicion)
+
+    if es_edicion:
+        print(f"[Jarvis Logic] EDICION: modificando '{dev_jarvis.active_project}'.")
+        result = await dev_jarvis.edit_project(user_text)
         return {"status": "success", "data": {"action": "reply", "message": result}}
 
     # --- PRIORIDAD 0: DEPORTES Y FINANZAS (SIEMPRE ANTES QUE CUALQUIER MODO) ---
@@ -398,7 +398,7 @@ async def process_query(req: UserQuery):
     ])
 
     if es_dinero:
-        print("[Jarvis Logic] 💰 FINANZAS detectadas, bypass total al motor financiero.")
+        print("[Jarvis Logic]  FINANZAS detectadas, bypass total al motor financiero.")
         contexto = get_financial_snapshot()
         prompt_synthesis = f"""Eres Jarvis, asistente ejecutivo. AÑO: 2026. Fecha: {ahora_str}.
 CONTEXTO FINANCIERO:\n{contexto}\nPREGUNTA: {req.query}\nResponde directo con los datos."""
@@ -413,7 +413,7 @@ CONTEXTO FINANCIERO:\n{contexto}\nPREGUNTA: {req.query}\nResponde directo con lo
             return {"status": "success", "data": {"action": "reply", "message": f"Error financiero: {e}"}}
 
     if es_futbol:
-        print("[Jarvis Logic] ⚽ DEPORTES detectados, bypass al motor deportivo.")
+        print("[Jarvis Logic]  DEPORTES detectados, bypass al motor deportivo.")
         contexto_deportivo = await get_sports_universal(low)
         prompt_synthesis = f"""Eres Jarvis, asistente ejecutivo de Rodrigo. AÑO: 2026. Fecha: {ahora_str}.
 CONTEXTO DEPORTIVO (ÚNICA VERDAD):\n{contexto_deportivo}\n
