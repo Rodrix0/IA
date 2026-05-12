@@ -639,6 +639,14 @@ async function getAIResponse(userText, activeMode, screenContext = null) {
             }
         }
 
+        // Hard-Override para forzar Agency cuando se menciona 4070 o multi-agente.
+        const lowerText = String(userText || '').toLowerCase();
+        if (lowerText.includes("4070") || lowerText.includes("multi-agente") || lowerText.includes("agency")) {
+            console.log("[Bypass] 🚀 Forzando Motor Multi-Agente (Agency) por palabra clave.");
+            intent.action = "build_software";
+            intent.target = userText;
+        }
+
         // Eliminar fallback de recipient determinístico para dejar que Tool Calling de Llama 3.1 se encargue 100% de parsear el contacto y el mensaje exacto.
 
         if (intent.action === "search_web" || intent.action === "get_live_data" || intent.action === "search_internet") {
@@ -1226,6 +1234,7 @@ ${apiSpec ? apiSpec + "\n" : ''}4. Each file MUST be encapsulated using XML tags
                         content = content.replace(/^```[a-z]*[\r\n]+/, '').replace(/```$/, '');
                         
                         const filePath = path.join(targetDir, filename);
+                        fs.mkdirSync(path.dirname(filePath), { recursive: true });
                         fs.writeFileSync(filePath, content.trim(), 'utf8');
                         console.log(`[Software Engineer] 📄 Guardado: ${filename}`);
                         fileCount++;
@@ -1240,7 +1249,9 @@ ${apiSpec ? apiSpec + "\n" : ''}4. Each file MUST be encapsulated using XML tags
                         
                         while ((mdMatch = mdRegex.exec(aiCode)) !== null) {
                             if (fileCount < defaultNames.length) {
-                                fs.writeFileSync(path.join(targetDir, defaultNames[fileCount]), mdMatch[1].trim(), 'utf8');
+                                const mdPath = path.join(targetDir, defaultNames[fileCount]);
+                                fs.mkdirSync(path.dirname(mdPath), { recursive: true });
+                                fs.writeFileSync(mdPath, mdMatch[1].trim(), 'utf8');
                                 fileCount++;
                             }
                         }

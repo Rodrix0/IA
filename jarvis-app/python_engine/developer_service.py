@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, json, subprocess, httpx, re
+import os, json, subprocess, httpx, re, threading, http.server, socketserver, webbrowser, time
 
 # ── MODELOS ──────────────────────────────────────────────────────────────────
 CODER_MODEL = "qwen2.5-coder:7b"   # especialista en codigo
@@ -72,6 +72,24 @@ DESIGNS_CATALOG = {
     "ai":              "ai-labs",
     "devops":          "devops-graphite",
 }
+
+
+def start_local_server(project_path, port=8080):
+  """Start a local HTTP server in a background thread."""
+  class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format, *args):
+      return
+
+  def serve():
+    os.chdir(project_path)
+    with socketserver.TCPServer(("", port), QuietHandler) as httpd:
+      print(f"[Jarvis Server] Hosting at http://localhost:{port}")
+      httpd.serve_forever()
+
+  thread = threading.Thread(target=serve, daemon=True)
+  thread.start()
+  time.sleep(1)
+  webbrowser.open(f"http://localhost:{port}")
 
 def install_design(design_id: str, project_path: str) -> str:
     """Instala un DESIGN.md en la carpeta del proyecto via npx designdotmd add."""
@@ -1035,8 +1053,8 @@ class JarvisDeveloper:
         install_design(design_id, p_path)
         design_content = read_design_md(p_path)
 
-        # ── 4. Pipeline multi-agente (Stylist -> Architect -> Photographer -> Coder -> Scripter) ──
-        result = await run_agency(big_prompt, design_content, project_path=p_path)
+        # ── 4. Pipeline multi-agente (Architect -> Stylist -> Photographer -> Coder -> TS Coder -> Scripter) ──
+        result = await run_agency(big_prompt, p_path, design_content)
 
         # ── 5. Guardar archivos generados ─────────────────────────────────
         files = result.get("files", {})
@@ -1064,9 +1082,8 @@ h1{{color:#3fb950;}}</style></head>
                 json.dump(image_prompts, f, indent=2, ensure_ascii=False)
             print(f"[Jarvis] Guardado: image_prompts.json ({len(image_prompts)} conceptos)")
 
-        # ── 6. Abrir en navegador y VS Code ───────────────────────────────
-        index_path = os.path.join(p_path, "index.html")
-        os.system(f'start "" "{index_path}"')
+        # ── 6. Servir en navegador y abrir VS Code ───────────────────────
+        start_local_server(p_path, port=8080)
         try:
             subprocess.Popen(f'code "{p_path}"', shell=True)
         except Exception:
