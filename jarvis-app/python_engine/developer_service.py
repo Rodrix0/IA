@@ -75,21 +75,26 @@ DESIGNS_CATALOG = {
 
 
 def start_local_server(project_path, port=8080):
-  """Start a local HTTP server in a background thread."""
+  """Start a local HTTP server in a background thread. Handles port-in-use gracefully."""
   class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
       return
 
   def serve():
-    os.chdir(project_path)
-    with socketserver.TCPServer(("", port), QuietHandler) as httpd:
-      print(f"[Jarvis Server] Hosting at http://localhost:{port}")
-      httpd.serve_forever()
+    try:
+      os.chdir(project_path)
+      socketserver.TCPServer.allow_reuse_address = True
+      with socketserver.TCPServer(("", port), QuietHandler) as httpd:
+        print(f"[Jarvis Server] Hosting at http://localhost:{port}")
+        httpd.serve_forever()
+    except OSError:
+      print(f"[Jarvis Server] Puerto {port} ya en uso — refrescando navegador.")
 
   thread = threading.Thread(target=serve, daemon=True)
   thread.start()
-  time.sleep(1)
+  time.sleep(0.5)
   webbrowser.open(f"http://localhost:{port}")
+
 
 def install_design(design_id: str, project_path: str) -> str:
     """Instala un DESIGN.md en la carpeta del proyecto via npx designdotmd add."""
@@ -1004,6 +1009,60 @@ class JarvisDeveloper:
         self.active_project = _load_session()
         if self.active_project:
             print(f"[Jarvis Developer] Session recuperada: '{self.active_project}'")
+
+    async def edit_with_context(self, path: str, instruction: str) -> str:
+        """
+        Carga archivos de una ruta (carpeta o archivo), los pasa al Editor agent,
+        guarda los cambios y abre en VS Code.
+        """
+        from agency import load_project_files, run_editor
+
+        # Normalizar path
+        path = path.strip().strip('"\'')
+        if not os.path.exists(path):
+            return f"Senor, no encontre la ruta: {path}"
+
+        # Cargar archivos
+        print(f"[Editor] Cargando archivos de: {path}")
+        files_context = load_project_files(path)
+
+        if not files_context:
+            return f"No encontre archivos editables en: {path}"
+
+        file_list = ", ".join(files_context.keys())
+        print(f"[Editor] {len(files_context)} archivos cargados: {file_list[:200]}")
+
+        # Ejecutar Editor agent
+        edited = await run_editor(instruction, files_context, path)
+
+        if not edited:
+            return "El editor no pudo determinar que archivos modificar. Reformula el pedido."
+
+        # Guardar archivos editados
+        base_path = path if os.path.isdir(path) else os.path.dirname(path)
+        saved = []
+        for filename, content in edited.items():
+            out_path = os.path.join(base_path, filename)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            saved.append(filename)
+            print(f"[Editor] Guardado: {filename} ({len(content)} chars)")
+
+        # Abrir en VS Code
+        try:
+            subprocess.Popen(f'code "{base_path}"', shell=True)
+        except Exception:
+            pass
+
+        # Si hay index.html, abrir en navegador
+        index = os.path.join(base_path, "index.html")
+        if os.path.exists(index):
+            start_local_server(base_path, port=8080)
+
+        archivos_str = ", ".join(saved)
+        return (f"Senor, edite {len(saved)} archivo(s): {archivos_str}. "
+                f"Cambios guardados en {base_path}.")
 
     async def execute_full_project(self, big_prompt: str):
         from agency import run_agency

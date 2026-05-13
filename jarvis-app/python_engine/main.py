@@ -327,6 +327,26 @@ async def process_query(req: UserQuery):
         return {"status": "success", "data": {"action": "reply", "message": result}}
     # Si _tiene_creacion → el design_id se detecta dentro de execute_full_project via resolve_design_id
 
+    # --- 0.5 EDITOR CON RUTA (carpeta o archivo) ---
+    # Detectar paths Windows (C:\...) o Unix (/home/...)
+    import re as _re2
+    _path_match = _re2.search(
+        r'([A-Za-z]:\\[^\s,;]+|/(?:home|Users|var|opt|tmp)/[^\s,;]+)',
+        user_text
+    )
+    if _path_match:
+        detected_path = _path_match.group(1).strip().rstrip('.,;:')
+        import os as _os2
+        if _os2.path.exists(detected_path):
+            # Extraer la instruccion (todo lo que NO es el path)
+            instruction = user_text.replace(_path_match.group(0), "").strip()
+            if not instruction:
+                instruction = "Revisa el codigo y arregla cualquier error que encuentres."
+            print(f"[Jarvis Logic] EDITOR CON RUTA: {detected_path}")
+            print(f"[Jarvis Logic] Instruccion: {instruction[:100]}")
+            result = await dev_jarvis.edit_with_context(detected_path, instruction)
+            return {"status": "success", "data": {"action": "reply", "message": result}}
+
     # --- 1. NUEVO PROYECTO COMPLETO ---
     triggers_nuevo_proyecto = [
         # Formas directas
