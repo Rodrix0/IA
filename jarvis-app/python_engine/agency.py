@@ -581,6 +581,199 @@ function toggleCart() {{
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# AGENTE EDITOR  (Lee codigo existente + instruccion → devuelve codigo editado)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Extensiones que el editor puede leer
+EDITABLE_EXTENSIONS = {
+    ".html", ".htm", ".css", ".js", ".ts", ".jsx", ".tsx",
+    ".json", ".py", ".md", ".txt", ".xml", ".svg", ".php",
+    ".vue", ".svelte", ".astro", ".yaml", ".yml", ".toml",
+    ".env", ".sh", ".bat", ".ps1", ".sql", ".rb", ".go",
+}
+MAX_FILES = 30
+MAX_CHARS_PER_FILE = 15000
+
+
+def load_project_files(path: str) -> Dict[str, str]:
+    """
+    Carga archivos editables de una carpeta o archivo individual.
+    Retorna dict {filename_relativo: contenido}.
+    Limite: 30 archivos, 15000 chars c/u.
+    """
+    files = {}
+
+    if os.path.isfile(path):
+        ext = os.path.splitext(path)[1].lower()
+        if ext in EDITABLE_EXTENSIONS:
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    files[os.path.basename(path)] = f.read()[:MAX_CHARS_PER_FILE]
+            except Exception as e:
+                print(f"[Editor] Error leyendo {path}: {e}")
+        return files
+
+    if not os.path.isdir(path):
+        return files
+
+    count = 0
+    for root, dirs, filenames in os.walk(path):
+        # Ignorar carpetas comunes
+        dirs[:] = [d for d in dirs if d not in {
+            "node_modules", ".git", "__pycache__", "venv", ".venv",
+            "dist", "build", ".next", ".nuxt", "vendor",
+        }]
+        for fname in sorted(filenames):
+            if count >= MAX_FILES:
+                break
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in EDITABLE_EXTENSIONS:
+                continue
+            full = os.path.join(root, fname)
+            rel = os.path.relpath(full, path).replace("\\", "/")
+            try:
+                with open(full, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()[:MAX_CHARS_PER_FILE]
+                files[rel] = content
+                count += 1
+            except Exception:
+                pass
+        if count >= MAX_FILES:
+            break
+
+    print(f"[Editor] Cargados {len(files)} archivos de: {path}")
+    return files
+
+
+def _detect_target_files(instruction: str, available_files: list) -> list:
+    """Detecta qué archivos necesita editar basándose en la instrucción."""
+    low = instruction.lower()
+    targets = []
+
+    # Mapeo de keywords a extensiones/nombres
+    rules = [
+        (["js", "javascript", "script", "carrito", "cart", "boton", "botón",
+          "click", "evento", "funcion", "función", "logica", "lógica"], [".js", ".ts", ".jsx", ".tsx"]),
+        (["css", "estilo", "color", "diseño", "fuente", "font", "margin",
+          "padding", "borde", "sombra", "animacion", "animación"], [".css"]),
+        (["html", "estructura", "seccion", "sección", "navbar", "footer",
+          "header", "hero", "sidebar", "formulario", "form"], [".html", ".htm"]),
+        (["python", "backend", "api", "server", "endpoint"], [".py"]),
+        (["json", "config", "package", "datos"], [".json"]),
+    ]
+
+    matched_exts = set()
+    for keywords, exts in rules:
+        if any(k in low for k in keywords):
+            matched_exts.update(exts)
+
+    # Si el usuario menciona un archivo específico
+    for f in available_files:
+        if f.lower() in low or os.path.basename(f).lower() in low:
+            targets.append(f)
+
+    # Filtrar por extensiones detectadas
+    if matched_exts:
+        for f in available_files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in matched_exts and f not in targets:
+                targets.append(f)
+
+    # Si nada matcheó, editar los principales
+    if not targets:
+        priority = ["index.html", "script.js", "style.css", "main.js", "app.js"]
+        for p in priority:
+            for f in available_files:
+                if f.endswith(p) and f not in targets:
+                    targets.append(f)
+
+    return targets[:5]  # Máximo 5 archivos a editar por vez
+
+
+EDITOR_PROMPT = """You are a SENIOR CODE EDITOR. Your job is to FIX and IMPROVE existing code.
+
+USER INSTRUCTION: {instruction}
+
+FILE TO EDIT ({filename}):
+```
+{file_content}
+```
+
+{other_files_context}
+
+RULES:
+1. Output ONLY the complete, corrected version of {filename}.
+2. Keep ALL existing functionality that the user didn't ask to change.
+3. Fix any bugs you find related to the instruction.
+4. Do NOT add comments explaining your changes.
+5. Do NOT use markdown fences in your output.
+6. Output the FULL file content, not just the changed parts.
+
+OUTPUT: The complete corrected file content."""
+
+
+async def run_editor(instruction: str, files_context: Dict[str, str],
+                     target_path: str) -> Dict[str, str]:
+    """
+    Agente Editor: lee archivos existentes + instrucción → genera versiones editadas.
+    Retorna dict {filename: nuevo_contenido}.
+    """
+    available = list(files_context.keys())
+    targets = _detect_target_files(instruction, available)
+
+    if not targets:
+        print("[Editor] No se detectaron archivos para editar.")
+        return {}
+
+    print(f"[Editor] Archivos a editar: {targets}")
+    edited_files = {}
+
+    for filename in targets:
+        content = files_context.get(filename, "")
+        if not content:
+            continue
+
+        # Contexto de otros archivos (resumido)
+        other_context = ""
+        other_files = [f for f in available if f != filename][:5]
+        if other_files:
+            snippets = []
+            for of in other_files:
+                snippet = files_context[of][:2000]
+                snippets.append(f"--- {of} (first 2000 chars) ---\n{snippet}")
+            other_context = "OTHER FILES FOR CONTEXT:\n" + "\n\n".join(snippets)
+
+        # Detectar lenguaje para el clean
+        ext = os.path.splitext(filename)[1].lower()
+        lang_map = {".html": "html", ".htm": "html", ".css": "css",
+                    ".js": "javascript", ".ts": "typescript", ".py": "python",
+                    ".json": "json"}
+        lang = lang_map.get(ext, "")
+
+        raw = await _call_llm(
+            EDITOR_PROMPT.format(
+                instruction=instruction[:500],
+                filename=filename,
+                file_content=content[:12000],
+                other_files_context=other_context[:4000],
+            ),
+            max_tokens=8000, temperature=0.2,
+        )
+
+        edited = _clean_code(raw, lang) if lang else raw.strip()
+
+        # Validación: el resultado debe tener contenido razonable
+        if len(edited) > 30:
+            edited_files[filename] = edited
+            print(f"[Editor] {filename} editado: {len(content)} -> {len(edited)} chars")
+        else:
+            print(f"[Editor] {filename} - resultado muy corto, manteniendo original")
+            edited_files[filename] = content
+
+    return edited_files
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ENSAMBLAJE FINAL (Python deterministico, NO un agente LLM)
 # ═══════════════════════════════════════════════════════════════════════════════
 

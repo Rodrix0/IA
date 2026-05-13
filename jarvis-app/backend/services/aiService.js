@@ -464,6 +464,33 @@ async function fetchOllamaResponse(prompt) {
 
 async function getAIResponse(userText, activeMode, screenContext = null) {
     try {
+        // ── EARLY PATH DETECTION: si el usuario pasa una ruta, es EDICION directa ──
+        const fs = require('fs');
+        const earlyPathMatch = String(userText || '').match(/([A-Za-z]:\\[^\s,;]+)/);
+        if (earlyPathMatch) {
+            const detectedPath = earlyPathMatch[1].replace(/[.,;:]+$/, '');
+            if (fs.existsSync(detectedPath)) {
+                console.log(`[Jarvis] 📂 Path detectado: ${detectedPath} → Python Editor`);
+                try {
+                    const pyRes = await fetch('http://127.0.0.1:8000/api/v1/query', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: userText })
+                    });
+                    if (pyRes.ok) {
+                        const pyData = await pyRes.json();
+                        const pyMessage = pyData?.data?.message || pyData?.message || '';
+                        if (pyMessage) {
+                            conversationHistory.push({ role: "user", content: userText });
+                            conversationHistory.push({ role: "assistant", content: { reply: pyMessage } });
+                            return pyMessage;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[Jarvis] Python Editor inalcanzable:", e.message);
+                }
+            }
+        }
         let systemPrompt = "INSTRUCCIONES DEL SISTEMA BASE:\n" + activeMode.prompt + "\n";
         systemPrompt += "Eres Jarvis, el asistente de PC. Tienes herramientas de automatización y de auto-aprendizaje (Code-Act).\n";
         systemPrompt += "REGLA DE VIDA O MUERTE: Si el usuario te hace charla casual, te pregunta qué sabes hacer, cómo estás, o cualquier pregunta general sobre ti mismo, ESTÁ EXTRICTAMENTE PROHIBIDO (PENADO) USAR UNA HERRAMIENTA. Responde únicamente chateando de forma natural.\n";
@@ -1056,6 +1083,30 @@ Por favor, redacta el informe académico EXTREMADAMENTE EXTENSO basándote ÚNIC
                 const { exec } = require('child_process');
 
                 console.log(`[Software Engineer] 💻 Iniciando desarrollo/build de: ${intent.target}`);
+
+                // ── DETECCION DE RUTA: si el usuario pasa un path, es EDICION ──
+                const pathMatch = String(userText || '').match(/([A-Za-z]:\\[^\s,;]+)/);
+                if (pathMatch && fs.existsSync(pathMatch[1].replace(/[.,;:]+$/, ''))) {
+                    console.log(`[Software Engineer] 📂 Path detectado: ${pathMatch[1]} → enviando a Python Editor`);
+                    try {
+                        const pyRes = await fetch('http://127.0.0.1:8000/api/v1/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: userText })
+                        });
+                        if (pyRes.ok) {
+                            const pyData = await pyRes.json();
+                            const pyMessage = pyData?.data?.message || pyData?.message || '';
+                            if (pyMessage) {
+                                conversationHistory.push({ role: "user", content: userText });
+                                conversationHistory.push({ role: "assistant", content: intent });
+                                return pyMessage;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("[Software Engineer] Python Editor inalcanzable:", e.message);
+                    }
+                }
 
                 const lowerText = String(userText || '').toLowerCase();
                 const normalizedText = lowerText.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
