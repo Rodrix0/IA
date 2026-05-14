@@ -79,17 +79,62 @@ async def _call_llm(prompt: str, model: str = CODER_MODEL,
 def _clean_code(raw: str, lang: str = "html") -> str:
     if not raw:
         return ""
-    pattern = rf"```(?:{lang})?\s*(.*?)\s*```" if lang else r"```(?:\w+)?\s*(.*?)\s*```"
-    match = re.search(pattern, raw, re.DOTALL | re.IGNORECASE)
+
+    # 1. Try markdown fences with language tag
+    if lang:
+        pattern = rf"```(?:{lang})?\s*(.*?)\s*```"
+        match = re.search(pattern, raw, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+    # 2. Try any markdown fences
+    match = re.search(r"```(?:\w+)?\s*(.*?)\s*```", raw, re.DOTALL)
     if match:
         return match.group(1).strip()
-    low = raw.lower()
-    start = low.find("<!doctype html>")
-    if start == -1:
-        start = low.find("<html")
-    if start != -1:
-        end = low.rfind("</html>")
-        return raw[start:end + 7].strip() if end != -1 else raw[start:].strip()
+
+    # 3. For HTML: look for doctype/html tags
+    if lang == "html":
+        low = raw.lower()
+        start = low.find("<!doctype html>")
+        if start == -1:
+            start = low.find("<html")
+        if start != -1:
+            end = low.rfind("</html>")
+            return raw[start:end + 7].strip() if end != -1 else raw[start:].strip()
+
+    # 4. For JS/TS: strip LLM preamble (e.g. "Here is the corrected code:")
+    if lang in ("javascript", "typescript"):
+        lines = raw.split("\n")
+        # Find first line that looks like actual JS
+        start_idx = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if (stripped.startswith(("const ", "let ", "var ", "function ", "class ",
+                                     "import ", "export ", "//", "/*", "'use ",
+                                     '"use ', "document.", "window.", "addEventListener"))
+                or stripped == ""):
+                start_idx = i
+                break
+        return "\n".join(lines[start_idx:]).strip()
+
+    # 5. For CSS: find first selector or :root
+    if lang == "css":
+        lines = raw.split("\n")
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if (stripped.startswith((":", "@", "*", ".", "#", "body", "html", "/*"))
+                or re.match(r'^[a-zA-Z][\w-]*\s*[\{,]', stripped)):
+                return "\n".join(lines[i:]).strip()
+
+    # 6. For Python: find first import/def/class
+    if lang == "python":
+        lines = raw.split("\n")
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if (stripped.startswith(("import ", "from ", "def ", "class ", "#", '"""', "'''"))
+                or stripped == ""):
+                return "\n".join(lines[i:]).strip()
+
     return raw.strip()
 
 
@@ -690,26 +735,75 @@ def _detect_target_files(instruction: str, available_files: list) -> list:
     return targets[:5]  # Máximo 5 archivos a editar por vez
 
 
-EDITOR_PROMPT = """You are a SENIOR CODE EDITOR. Your job is to FIX and IMPROVE existing code.
+EDITOR_PROMPT_JS = """You are a JavaScript expert. EDIT this file.
 
-USER INSTRUCTION: {instruction}
+TASK: {instruction}
 
-FILE TO EDIT ({filename}):
+CURRENT {filename}:
+```javascript
+{file_content}
+```
+
+{other_files_context}
+
+Apply the changes the user requested. You MUST modify the code.
+Output the COMPLETE updated JavaScript file wrapped in ```javascript fences.
+Do NOT explain. Do NOT skip any existing code. Output ALL the code with your changes applied."""
+
+EDITOR_PROMPT_HTML = """You are an HTML/CSS expert. EDIT this file.
+
+TASK: {instruction}
+
+CURRENT {filename}:
+```html
+{file_content}
+```
+
+{other_files_context}
+
+Apply the changes the user requested. You MUST modify the code.
+Output the COMPLETE updated HTML file wrapped in ```html fences.
+Do NOT explain. Do NOT skip any existing code. Output ALL the code with your changes applied."""
+
+EDITOR_PROMPT_CSS = """You are a CSS expert. EDIT this file.
+
+TASK: {instruction}
+
+CURRENT {filename}:
+```css
+{file_content}
+```
+
+{other_files_context}
+
+Apply the changes the user requested. You MUST modify the code.
+Output the COMPLETE updated CSS file wrapped in ```css fences.
+Do NOT explain. Do NOT skip any existing code. Output ALL the code with your changes applied."""
+
+EDITOR_PROMPT_GENERIC = """You are a code editor. EDIT this file.
+
+TASK: {instruction}
+
+CURRENT {filename}:
 ```
 {file_content}
 ```
 
 {other_files_context}
 
-RULES:
-1. Output ONLY the complete, corrected version of {filename}.
-2. Keep ALL existing functionality that the user didn't ask to change.
-3. Fix any bugs you find related to the instruction.
-4. Do NOT add comments explaining your changes.
-5. Do NOT use markdown fences in your output.
-6. Output the FULL file content, not just the changed parts.
+Apply the changes the user requested. You MUST modify the code.
+Output the COMPLETE updated file wrapped in ``` fences.
+Do NOT explain. Do NOT skip any existing code. Output ALL the code with your changes applied."""
 
-OUTPUT: The complete corrected file content."""
+
+def _get_editor_prompt(lang: str) -> str:
+    if lang == "javascript" or lang == "typescript":
+        return EDITOR_PROMPT_JS
+    if lang == "html":
+        return EDITOR_PROMPT_HTML
+    if lang == "css":
+        return EDITOR_PROMPT_CSS
+    return EDITOR_PROMPT_GENERIC
 
 
 async def run_editor(instruction: str, files_context: Dict[str, str],
@@ -741,31 +835,33 @@ async def run_editor(instruction: str, files_context: Dict[str, str],
             for of in other_files:
                 snippet = files_context[of][:2000]
                 snippets.append(f"--- {of} (first 2000 chars) ---\n{snippet}")
-            other_context = "OTHER FILES FOR CONTEXT:\n" + "\n\n".join(snippets)
+            other_context = "OTHER FILES FOR REFERENCE:\n" + "\n\n".join(snippets)
 
-        # Detectar lenguaje para el clean
+        # Detectar lenguaje
         ext = os.path.splitext(filename)[1].lower()
         lang_map = {".html": "html", ".htm": "html", ".css": "css",
                     ".js": "javascript", ".ts": "typescript", ".py": "python",
-                    ".json": "json"}
+                    ".json": "json", ".jsx": "javascript", ".tsx": "typescript"}
         lang = lang_map.get(ext, "")
 
+        prompt_template = _get_editor_prompt(lang)
         raw = await _call_llm(
-            EDITOR_PROMPT.format(
+            prompt_template.format(
                 instruction=instruction[:500],
                 filename=filename,
                 file_content=content[:12000],
                 other_files_context=other_context[:4000],
             ),
-            max_tokens=8000, temperature=0.2,
+            max_tokens=8000, temperature=0.3,
         )
 
         edited = _clean_code(raw, lang) if lang else raw.strip()
 
         # Validación: el resultado debe tener contenido razonable
-        if len(edited) > 30:
+        if len(edited) > 50:
             edited_files[filename] = edited
-            print(f"[Editor] {filename} editado: {len(content)} -> {len(edited)} chars")
+            changed = "SIN CAMBIOS" if edited.strip() == content.strip() else "MODIFICADO"
+            print(f"[Editor] {filename}: {len(content)} -> {len(edited)} chars [{changed}]")
         else:
             print(f"[Editor] {filename} - resultado muy corto, manteniendo original")
             edited_files[filename] = content
