@@ -196,31 +196,87 @@ io.on('connection', (socket) => {
                 }
             }
             else {
-                // 2. Comandos de sistema (Abrir apps y Entrenamientos) - Conservamos la Vía Rápida primero
-                const sysCommand = systemService.handleSystemCommand(text);
-                
-                if (sysCommand.isTraining) {
-                    systemService.saveCustomCommand(sysCommand.trigger, sysCommand.appName);
-                    responseText = `Entendido. A partir de ahora, cuando me digas "${sysCommand.trigger}", abriré ${sysCommand.appName}.`;
-                    action = "TRAINING_SAVED";
-                }
-                else if (sysCommand.isSystemCommand) {
-                    responseText = sysCommand.isLearned
-                        ? `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`
-                        : `Abriendo ${sysCommand.appName}.`;
+                const lowerText = text.toLowerCase();
+                const activeMode = modeService.getActiveMode();
 
-                    const activeMode = modeService.getActiveMode();
-                    const success = await systemService.openApp(sysCommand.appName, activeMode.id);
-                    if (!success) {
-                        responseText = `Hubo un inconveniente al intentar abrir la aplicación ${sysCommand.appName}.`;
+                // === MODO FUTBOL (toggle, igual que Programador) ===
+                if (activeMode && activeMode.id === 'futbol') {
+                    console.log(`[Jarvis Server] ⚽ MODO FUTBOL activo: buscando con Puppeteer.`);
+                    try {
+                        const { searchSports } = require('./services/aiService');
+                        const respuesta = await searchSports(text);
+                        responseText = respuesta || "No reconoci el equipo. Escribi el nombre completo (ej: 'Boca Juniors', 'Real Madrid').";
+                    } catch (e) {
+                        console.error("[Futbol] Error:", e.message);
+                        responseText = "Hubo un problema buscando el partido. Intenta de nuevo.";
                     }
                 }
-                // 3. Respuesta de IA (Cerebro Híbrido) - Delega todo lo demás a Ollama
+
+                // === MODO PROGRAMADOR ===
                 else {
-                    const activeMode = modeService.getActiveMode();
-                    const screenContext = observerService.getScreenContext();
-                    responseText = await aiService.getAIResponse(text, activeMode, screenContext);
+                const esModoActivado = activeMode && activeMode.id === 'programador';
+                const esCodigo = lowerText.includes("quiero que programes") ||
+                                 lowerText.includes("programá esto") ||
+                                 lowerText.includes("codeame") ||
+                                 lowerText.includes("pagina web") ||
+                                 lowerText.includes("página web") ||
+                                 lowerText.includes("sitio web") ||
+                                 lowerText.includes("web de") ||
+                                 lowerText.includes("proyecto web") ||
+                                 lowerText.includes("crea una web") ||
+                                 lowerText.includes("hazme una web") ||
+                                 (lowerText.includes("crea") && lowerText.includes("web")) ||
+                                 (lowerText.includes("haz") && lowerText.includes("pagina")) ||
+                                 (lowerText.includes("crear") && lowerText.includes("html")) ||
+                                 text.length > 300;
+                const esCarga = /carg[aá] el proyecto|cargar proyecto|continu[aá] con|segu[ií] con|trabajá sobre/.test(lowerText);
+                const esEdicion = /modificá|modifica|cambiá|cambia |agregá|agrega |quitá|quita |sacá|saca |eliminá|elimina|elimines|elimin[aá]|actualizá|actualiza|seguí trabajando|sigue trabajando|editá|edita |mejorá|mejora|arreglá|arregla|reemplaz[aá]|borrá|borra |añad[ií]|añade/.test(lowerText);
+                const esModoPrograma = esModoActivado || esCodigo || esCarga || esEdicion;
+
+
+                if (esModoPrograma) {
+                    console.log(`[Jarvis Server] 🚨 MODO DESARROLLADOR: delegando a Python.`);
+                    try {
+                        const pyRes = await fetch('http://127.0.0.1:8000/api/v1/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: text })
+                        });
+                        const pyData = await pyRes.json();
+                        responseText = pyData?.data?.message || "Señor, el motor de desarrollo procesó su solicitud.";
+                    } catch (e) {
+                        console.error("[Jarvis Server] Python engine inalcanzable:", e.message);
+                        responseText = "Señor, no pude conectarme con el motor de desarrollo Python. ¿Está corriendo Uvicorn?";
+                    }
                 }
+                // 2. Comandos de sistema (Abrir apps y Entrenamientos)
+                else {
+                    const sysCommand = systemService.handleSystemCommand(text);
+                    
+                    if (sysCommand.isTraining) {
+                        systemService.saveCustomCommand(sysCommand.trigger, sysCommand.appName);
+                        responseText = `Entendido. A partir de ahora, cuando me digas "${sysCommand.trigger}", abriré ${sysCommand.appName}.`;
+                        action = "TRAINING_SAVED";
+                    }
+                    else if (sysCommand.isSystemCommand) {
+                        responseText = sysCommand.isLearned
+                            ? `Comando aprendido detectado. Ejecutando ${sysCommand.appName}, señor.`
+                            : `Abriendo ${sysCommand.appName}.`;
+
+                        const activeMode = modeService.getActiveMode();
+                        const success = await systemService.openApp(sysCommand.appName, activeMode.id);
+                        if (!success) {
+                            responseText = `Hubo un inconveniente al intentar abrir la aplicación ${sysCommand.appName}.`;
+                        }
+                    }
+                    // 3. Respuesta de IA (Cerebro Híbrido) - Delega todo lo demás a Ollama
+                    else {
+                        const activeMode = modeService.getActiveMode();
+                        const screenContext = observerService.getScreenContext();
+                        responseText = await aiService.getAIResponse(text, activeMode, screenContext);
+                    }
+                }
+                } // fin else (interceptor programador)
             }
 
         } catch (error) {
